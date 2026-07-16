@@ -106,8 +106,8 @@ def extract_keypoints(video_path, csv_path, output_video_path):
                     frame_resized,
                     results.pose_landmarks,
                     mp_pose.POSE_CONNECTIONS,
-                    mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=4, circle_radius=6),
-                    mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=4, circle_radius=2)
+                    mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=1, circle_radius=2),
+                    mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=1, circle_radius=1)
                 )
             else:
                 # 관절을 인식하지 못한 프레임은 빈 값('')으로 채워 행 수를 유지한다.
