@@ -13,6 +13,7 @@ features.py — 스쿼트 특징 추출: 측면 각도 + 정면 비율
 """
 
 import numpy as np
+import csv
 from smooth_landmarks import load_landmarks
 from normalize_landmarks import _xyz
 from angles import (joint_angle, select_side, compute_angles,
@@ -97,23 +98,51 @@ def extract_features(exercise, view, csv_path):
     return feats
 
 
-# ── 실행: 정면/측면 특징 추출 (검증용 요약: 서있음 vs 최저점) ───────────────────
+# ── 특징 CSV 저장 ──────────────────────────────────────────────────────────────
+def save_features(out_csv, frames, feats):
+    """특징 시계열(dict)을 frame_number 와 함께 CSV 로 저장한다.
+
+    컬럼: frame_number, <특징1>, <특징2>, ...  (특징마다 프레임당 값 1개)
+    """
+    names = list(feats)
+    with open(out_csv, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['frame_number'] + names)
+        for i, fr in enumerate(frames):
+            writer.writerow([fr] + [feats[n][i] for n in names])
+
+
+def extract_and_save(exercise, view, input_csv, output_csv):
+    """운동·뷰의 특징을 계산해 CSV 로 저장한다. 저장한 특징 dict 를 반환."""
+    feats = extract_features(exercise, view, input_csv)
+    frames, _ = load_landmarks(input_csv)
+    save_features(output_csv, frames, feats)
+    print(f"특징 저장 [{exercise}/{view}] {list(feats)} → {output_csv}")
+    return feats
+
+
+# ── 실행: 정면/측면 특징 추출 → CSV 저장 (+ 검증용 요약) ───────────────────────
 if __name__ == "__main__":
-    side_feats, leg = extract_side_features("data/processed/squat_side_landmarks_normalized.csv")
+    side_feats = extract_and_save(
+        'squat', 'side',
+        "data/processed/squat_side_landmarks_normalized.csv",
+        "data/processed/squat_side_features.csv")
     b = int(np.argmin(side_feats['knee']))  # 무릎 각도 최소 = 최저점
-    print(f"[측면] 카메라쪽 다리={leg}, 최저점 frame={b}")
+    print(f"[측면] 최저점 frame={b}")
     for name, s in side_feats.items():
         unit = 'deg' if name in ('knee', 'hip', 'trunk', 'shin') else '   '
         print(f"  {name:11s}: 서있음 {s[0]:7.2f}{unit}  →  최저점 {s[b]:7.2f}{unit}")
 
-    front_feats = extract_front_features("data/processed/squat_front_landmarks_normalized.csv")
-    kmean = (front_feats['sym_knee'])  # 참고용
-    # 정면 최저점: 좌우 무릎각 평균 최소 지점 근사 → 별도 계산
+    front_feats = extract_and_save(
+        'squat', 'front',
+        "data/processed/squat_front_landmarks_normalized.csv",
+        "data/processed/squat_front_features.csv")
+    # 정면 최저점: 좌우 무릎각 평균 최소 지점 근사
     _, fdata = load_landmarks("data/processed/squat_front_landmarks_normalized.csv")
     fx, fy, _, _ = _xyz(fdata)
     kL = joint_angle(_pt(fx, fy, LEFT['hip']),  _pt(fx, fy, LEFT['knee']),  _pt(fx, fy, LEFT['ankle']))
     kR = joint_angle(_pt(fx, fy, RIGHT['hip']), _pt(fx, fy, RIGHT['knee']), _pt(fx, fy, RIGHT['ankle']))
     fb = int(np.argmin((kL + kR) / 2))
-    print(f"\n[정면] 최저점 frame={fb}")
+    print(f"[정면] 최저점 frame={fb}")
     for name, s in front_feats.items():
         print(f"  {name:9s}: 서있음 {s[0]:7.3f}  →  최저점 {s[fb]:7.3f}")
