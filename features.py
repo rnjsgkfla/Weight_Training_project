@@ -112,6 +112,18 @@ def save_features(out_csv, frames, feats):
             writer.writerow([fr] + [feats[n][i] for n in names])
 
 
+def load_features(csv_path):
+    """save_features 로 저장한 특징 CSV 를 (frames, {이름: 배열}) 로 읽는다."""
+    with open(csv_path, newline='') as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        rows = list(reader)
+    names = header[1:]
+    frames = np.array([int(r[0]) for r in rows])
+    feats = {n: np.array([float(r[1 + i]) for r in rows]) for i, n in enumerate(names)}
+    return frames, feats
+
+
 def extract_and_save(exercise, view, input_csv, output_csv):
     """운동·뷰의 특징을 계산해 CSV 로 저장한다. 저장한 특징 dict 를 반환."""
     feats = extract_features(exercise, view, input_csv)
