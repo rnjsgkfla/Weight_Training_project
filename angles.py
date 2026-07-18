@@ -41,21 +41,41 @@ def angle_to_vertical(p, q):
 
 # ── 운동별 각도 정의 (선언만 하면 됨) ──────────────────────────────────────────
 # 형식: 이름 -> ('joint', 역할A, 역할B, 역할C)  또는  ('vertical', 역할P, 역할Q)
-SQUAT_SIDE_ANGLES = {
-    'knee':  ('joint', 'hip', 'knee', 'ankle'),       # 무릎 굽힘 (깊이·rep)
-    'hip':   ('joint', 'shoulder', 'hip', 'knee'),    # 고관절 굽힘
-    'trunk': ('vertical', 'hip', 'shoulder'),         # 몸통 기울기
-    'shin':  ('vertical', 'ankle', 'knee'),           # 정강이 각도
+# 전신 각도 정의 사전(vocabulary). 여기서 '정의'만 해두고, 계산은 운동 선택 시
+# 필요한 것만 한다. (미리 다 계산하지 않음 — 계산 비용은 0에 가깝고, 안 쓰는 각을
+# 매번 계산·저장할 이유가 없다.)  utils.py 의 ANGLE_JOINTS 를 역할 기반으로 흡수.
+#   형식: 이름 -> ('joint', 역할A, 역할B, 역할C)  또는  ('vertical', 역할P, 역할Q)
+ANGLE_LIBRARY = {
+    # 세 점 관절각
+    'elbow':     ('joint', 'shoulder', 'elbow', 'wrist'),   # 팔꿈치 굽힘 (팔굽혀펴기)
+    'shoulder':  ('joint', 'elbow', 'shoulder', 'hip'),     # 어깨 각 (팔 벌림)
+    'hip':       ('joint', 'shoulder', 'hip', 'knee'),      # 고관절 굽힘
+    'knee':      ('joint', 'hip', 'knee', 'ankle'),         # 무릎 굽힘
+    'ankle':     ('joint', 'knee', 'ankle', 'foot'),        # 발목 각
+    'body_line': ('joint', 'shoulder', 'hip', 'ankle'),     # 몸 일직선(~180, 팔굽혀펴기)
+    # 분절 vs 수직축
+    'trunk':     ('vertical', 'hip', 'shoulder'),           # 몸통 기울기
+    'shin':      ('vertical', 'ankle', 'knee'),             # 정강이 각도
+    'upper_arm': ('vertical', 'shoulder', 'elbow'),         # 팔(상완) 벌림 각 (사이드레터럴)
 }
 
-# 미래 운동 예시 (필요할 때 주석 해제 후 사용):
-# PUSHUP_ANGLES = {
-#     'elbow': ('joint', 'shoulder', 'elbow', 'wrist'),  # 팔꿈치 굽힘
-#     'body':  ('joint', 'shoulder', 'hip', 'ankle'),    # 몸 일직선 유지(~180)
-# }
-# LATERAL_RAISE_ANGLES = {
-#     'abduction': ('vertical', 'shoulder', 'elbow'),    # 팔 벌림 각
-# }
+# 운동이 어떤 각도를 쓰는지만 나열. 새 운동 추가 = 여기에 한 줄.
+EXERCISE_ANGLES = {
+    'squat':         ['knee', 'hip', 'trunk', 'shin'],
+    'pushup':        ['elbow', 'body_line'],
+    'lateral_raise': ['upper_arm', 'shoulder'],
+}
+
+
+def exercise_angle_defs(exercise):
+    """운동 이름 -> 그 운동에 필요한 각도 정의 dict (ANGLE_LIBRARY 에서 선택)."""
+    if exercise not in EXERCISE_ANGLES:
+        raise ValueError(f"등록되지 않은 운동: {exercise} (가능: {list(EXERCISE_ANGLES)})")
+    return {name: ANGLE_LIBRARY[name] for name in EXERCISE_ANGLES[exercise]}
+
+
+# 스쿼트 측면 각도 (features.py 등에서 사용). 라이브러리에서 파생 → 중복 정의 없음.
+SQUAT_SIDE_ANGLES = exercise_angle_defs('squat')
 
 
 # ── 카메라쪽(visibility 높은) 좌/우 선택 ───────────────────────────────────────
@@ -101,10 +121,15 @@ def angles_from_csv(csv_path, angle_defs):
     return compute_angles(x, y, angle_defs, side), side
 
 
-# ── 실행: 측면 스쿼트 각도 계산 (검증용 요약 출력) ─────────────────────────────
+# ── 실행: 등록된 운동별 각도 정의 확인 + 스쿼트 각도 계산 (검증용) ─────────────
 if __name__ == "__main__":
+    print("등록된 운동과 각도 정의:")
+    for ex in EXERCISE_ANGLES:
+        print(f"  {ex:14s}: {list(exercise_angle_defs(ex))}")
+
+    print()
     angles, side = angles_from_csv(
-        "data/processed/squat_side_landmarks_normalized.csv", SQUAT_SIDE_ANGLES)
+        "data/processed/squat_side_landmarks_normalized.csv", exercise_angle_defs('squat'))
     side_name = 'LEFT' if side is LEFT else 'RIGHT'
     bottom = int(np.argmin(angles['knee']))  # 무릎 각도 최소 = 최저점
     print(f"측면 스쿼트 각도 (카메라쪽 다리: {side_name}, 최저점 frame={bottom})")

@@ -74,6 +74,29 @@ def extract_front_features(csv_path):
     return feats
 
 
+# ── 운동·뷰 선택 디스패처 ──────────────────────────────────────────────────────
+def extract_features(exercise, view, csv_path):
+    """운동과 뷰를 고르면 해당 특징 시계열(dict)을 반환한다.
+
+    - 스쿼트는 뷰별 전용 추출기(각도+위치, 비율)를 사용.
+    - 그 외 운동(팔굽혀펴기·사이드레터럴 등)은 아직 뷰 전용 로직이 없으므로
+      angles 엔진으로 그 운동의 '각도'만 계산해 돌려준다. (비율·위치 특징은
+      해당 운동을 구현할 때 여기에 뷰 전용 추출기를 추가하면 된다.)
+    """
+    if exercise == 'squat':
+        if view == 'side':
+            feats, _leg = extract_side_features(csv_path)
+            return feats
+        if view == 'front':
+            return extract_front_features(csv_path)
+        raise ValueError(f"스쿼트에 없는 뷰: {view}")
+
+    # 각도만 필요한 운동은 angles 엔진으로 바로 (카메라쪽 자동 선택)
+    from angles import angles_from_csv, exercise_angle_defs
+    feats, _side = angles_from_csv(csv_path, exercise_angle_defs(exercise))
+    return feats
+
+
 # ── 실행: 정면/측면 특징 추출 (검증용 요약: 서있음 vs 최저점) ───────────────────
 if __name__ == "__main__":
     side_feats, leg = extract_side_features("data/processed/squat_side_landmarks_normalized.csv")
