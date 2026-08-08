@@ -24,21 +24,35 @@ from smooth_landmarks import smooth_csv
 from normalize_landmarks import normalize_csv
 from features import extract_and_save
 from rep_features import slice_reps
-from judge import judge_rep, format_feedback
+from judge import judge_rep, format_feedback, PHASE_LABELS
 
-# 기준(템플릿) 영상의 특징/스무딩 CSV — 뷰별 1 rep
+# 기준(템플릿) 영상의 특징/스무딩 CSV — 운동·뷰별 1 rep
 REFERENCE = {
-    'side':  ("data/processed/squat_side_features.csv",
-              "data/processed/squat_side_landmarks_smoothed.csv"),
-    'front': ("data/processed/squat_front_features.csv",
-              "data/processed/squat_front_landmarks_smoothed.csv"),
+    'squat': {
+        'side':  ("data/processed/squat_side_features.csv",
+                  "data/processed/squat_side_landmarks_smoothed.csv"),
+        'front': ("data/processed/squat_front_features.csv",
+                  "data/processed/squat_front_landmarks_smoothed.csv"),
+    },
+    'lateral_raise': {
+        'front': ("data/processed/sidelateralraise_front_features.csv",
+                  "data/processed/sidelateralraise_front_landmarks_smoothed.csv"),
+    },
 }
 
 # 기준 뼈대 영상 (비교 시각화용)
 REFERENCE_SKELETON = {
-    'side':  "data/processed/squat_side_skeleton.mp4",
-    'front': "data/processed/squat_front_skeleton.mp4",
+    'squat': {
+        'side':  "data/processed/squat_side_skeleton.mp4",
+        'front': "data/processed/squat_front_skeleton.mp4",
+    },
+    'lateral_raise': {
+        'front': "data/processed/sidelateralraise_front_skeleton.mp4",
+    },
 }
+
+# 운동 이름 (UI 표시용)
+EXERCISE_KR = {'squat': '스쿼트', 'lateral_raise': '사이드 레터럴 레이즈'}
 
 # 특징 → 한글 짧은 이름 / 단위 (UI 표시용)
 FEATURE_KR = {
@@ -46,8 +60,13 @@ FEATURE_KR = {
     'trunk': '상체 기울기', 'shin': '정강이 각도', 'knee_travel': '무릎 전방이동',
     'valgus': '무릎 모임', 'stance': '스탠스 너비',
     'sym_knee': '좌우 무릎 대칭', 'sym_hip': '골반 수평',
+    'arm_L': '왼팔 거상 높이', 'arm_R': '오른팔 거상 높이',
+    'elbow_L': '왼쪽 팔꿈치 각도', 'elbow_R': '오른쪽 팔꿈치 각도',
+    'wrist_L': '왼쪽 손목 높이', 'wrist_R': '오른쪽 손목 높이',
+    'shoulder_height_diff': '좌우 어깨 높이차',
 }
-FEATURE_UNIT = {'knee': '°', 'hip': '°', 'trunk': '°', 'shin': '°', 'sym_knee': '°'}
+FEATURE_UNIT = {'knee': '°', 'hip': '°', 'trunk': '°', 'shin': '°', 'sym_knee': '°',
+                'arm_L': '°', 'arm_R': '°', 'elbow_L': '°', 'elbow_R': '°'}
 
 
 def get_fps(video_path):
@@ -57,19 +76,19 @@ def get_fps(video_path):
     return fps if fps and fps > 0 else 24.0
 
 
-def load_reference_rep(view):
+def load_reference_rep(exercise, view):
     """기준 영상에서 템플릿 반복 1개를 로드한다."""
-    feat_csv, sm_csv = REFERENCE[view]
-    reps, _leg = slice_reps(feat_csv, sm_csv)
+    feat_csv, sm_csv = REFERENCE[exercise][view]
+    reps, _leg = slice_reps(feat_csv, sm_csv, exercise=exercise)
     if not reps:
-        raise RuntimeError(f"기준 영상({view})에서 반복을 찾지 못했습니다.")
+        raise RuntimeError(f"기준 영상({exercise}/{view})에서 반복을 찾지 못했습니다.")
     return reps[0]
 
 
-def process_user_video(video_path, view, workdir):
-    """사용자 영상 하나(한 뷰)를 파이프라인에 태워 반복별 특징까지 만든다."""
+def process_user_video(video_path, exercise, view, workdir):
+    """사용자 영상 하나(한 운동·뷰)를 파이프라인에 태워 반복별 특징까지 만든다."""
     os.makedirs(workdir, exist_ok=True)
-    base = os.path.join(workdir, view)
+    base = os.path.join(workdir, f"{exercise}_{view}")
     lm = base + "_landmarks.csv"
     sm = base + "_smoothed.csv"
     nm = base + "_normalized.csv"
@@ -79,21 +98,22 @@ def process_user_video(video_path, view, workdir):
     extract_keypoints(video_path, lm, sk)
     smooth_csv(lm, sm)
     normalize_csv(sm, nm, video_path, flip_side=(view == 'side'))
-    extract_and_save('squat', view, nm, ft)
-    user_reps, leg = slice_reps(ft, sm)
+    extract_and_save(exercise, view, nm, ft)
+    user_reps, leg = slice_reps(ft, sm, exercise=exercise)
     return user_reps, leg
 
 
-def analyze_view(video_path, view, workdir="data/processed/_user"):
-    """한 뷰 영상을 분석해 반복별 피드백을 출력한다."""
-    ref_rep = load_reference_rep(view)
-    user_reps, leg = process_user_video(video_path, view, workdir)
+def analyze_view(video_path, exercise, view, workdir="data/processed/_user"):
+    """한 운동·뷰 영상을 분석해 반복별 피드백을 출력한다."""
+    ref_rep = load_reference_rep(exercise, view)
+    user_reps, leg = process_user_video(video_path, exercise, view, workdir)
     fps = get_fps(video_path)
+    leg_label = leg if leg else "정면(양팔)"
 
-    print(f"\n===== [{view.upper()}] 카메라쪽 다리={leg} | 반복 {len(user_reps)}회 =====")
+    print(f"\n===== [{EXERCISE_KR[exercise]}/{view.upper()}] {leg_label} | 반복 {len(user_reps)}회 =====")
     total_faults = 0
     for k, rep in enumerate(user_reps, 1):
-        faults, _meta = judge_rep(ref_rep, rep)
+        faults, _meta = judge_rep(ref_rep, rep, exercise=exercise)
         total_faults += len(faults)
         t0 = (rep['start_f'] - 1) / fps
         t1 = (rep['end_f'] - 1) / fps
@@ -102,16 +122,17 @@ def analyze_view(video_path, view, workdir="data/processed/_user"):
     return total_faults
 
 
-def run_analysis(video_path, view, workdir="data/processed/_user"):
-    """한 뷰 영상을 분석해 피드백을 '문자열'로 반환한다 (UI 용)."""
-    ref_rep = load_reference_rep(view)
-    user_reps, leg = process_user_video(video_path, view, workdir)
+def run_analysis(video_path, exercise, view, workdir="data/processed/_user"):
+    """한 운동·뷰 영상을 분석해 피드백을 '문자열'로 반환한다 (UI 용)."""
+    ref_rep = load_reference_rep(exercise, view)
+    user_reps, leg = process_user_video(video_path, exercise, view, workdir)
     fps = get_fps(video_path)
+    leg_label = leg if leg else "정면(양팔)"
 
     view_kr = '측면' if view == 'side' else '정면'
-    lines = [f"### [{view_kr}] 카메라쪽 다리={leg} · 반복 {len(user_reps)}회"]
+    lines = [f"### [{view_kr}] {leg_label} · 반복 {len(user_reps)}회"]
     for k, rep in enumerate(user_reps, 1):
-        faults, _meta = judge_rep(ref_rep, rep)
+        faults, _meta = judge_rep(ref_rep, rep, exercise=exercise)
         t0 = (rep['start_f'] - 1) / fps
         t1 = (rep['end_f'] - 1) / fps
         lines.append(f"\n**{k}회차 ({t0:.1f}–{t1:.1f}초)**")
@@ -130,10 +151,15 @@ def frame_at(video_path, frame_number):
     return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
 
-def analyze_for_ui(side_video=None, front_video=None, workdir="data/processed/_user"):
+def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir="data/processed/_user"):
     """UI용 구조화 분석. 클릭 가능한 피드백 항목 리스트와 요약을 반환한다.
 
+    exercise 가 지원하지 않는 뷰(예: lateral_raise 의 side_video)는 무시한다.
+
     각 항목:
+      key         : 항목을 고르는 내부 식별자. 리스트 내 순번 기반이라 항상 고유하다
+                    (label 은 사람이 읽는 문구라 같은 회차·같은 특징이 서로 다른 시점에
+                    두 번 걸리면 같은 문구가 나올 수 있음 — 선택은 반드시 key 로 한다)
       label       : 선택 목록에 뜨는 이름
       detail      : 상세 설명(markdown)
       ref_video   : 모범 뼈대 영상 경로,  ref_frame : 그 안의 비교 프레임
@@ -142,24 +168,28 @@ def analyze_for_ui(side_video=None, front_video=None, workdir="data/processed/_u
     """
     items = []
     summary = []
-    for view, video in [('side', side_video), ('front', front_video)]:
+    videos = {'side': side_video, 'front': front_video}
+    for view in REFERENCE[exercise]:
+        video = videos.get(view)
         if not video:
             continue
-        ref_rep = load_reference_rep(view)
-        user_reps, leg = process_user_video(video, view, workdir)
+        ref_rep = load_reference_rep(exercise, view)
+        user_reps, leg = process_user_video(video, exercise, view, workdir)
         fps = get_fps(video)
         view_kr = '측면' if view == 'side' else '정면'
-        ref_skel = REFERENCE_SKELETON[view]
-        user_skel = os.path.join(workdir, f"{view}_skeleton.mp4")
+        ref_skel = REFERENCE_SKELETON[exercise][view]
+        user_skel = os.path.join(workdir, f"{exercise}_{view}_skeleton.mp4")
 
+        peak_label = PHASE_LABELS.get(exercise, PHASE_LABELS['squat'])[1]
         n_fault = 0
         for k, rep in enumerate(user_reps, 1):
-            faults, _meta = judge_rep(ref_rep, rep)
+            faults, _meta = judge_rep(ref_rep, rep, exercise=exercise)
             if not faults:
-                # 양호한 반복: 최저점끼리 비교를 보여준다
+                # 양호한 반복: 극점끼리 비교를 보여준다
                 items.append({
+                    'key': f"item{len(items)}",
                     'label': f"✅ {view_kr} · {k}회차 · 양호",
-                    'detail': f"### {view_kr} {k}회차 — 기준과 큰 차이 없음 👍\n최저 자세를 비교해 보세요.",
+                    'detail': f"### {view_kr} {k}회차 — 기준과 큰 차이 없음 👍\n{peak_label} 자세를 비교해 보세요.",
                     'ref_video': ref_skel, 'ref_frame': ref_rep['bottom_f'],
                     'user_video': user_skel, 'user_frame': rep['bottom_f'],
                     'ok': True,
@@ -178,7 +208,8 @@ def analyze_for_ui(side_video=None, front_video=None, workdir="data/processed/_u
                     f"➡️ {f['message']}"
                 )
                 items.append({
-                    'label': f"⚠️ {view_kr} · {k}회차 · {name}",
+                    'key': f"item{len(items)}",
+                    'label': f"⚠️ {view_kr} · {k}회차 · {name} ({t:.1f}s)",
                     'detail': detail,
                     'ref_video': ref_skel, 'ref_frame': f['ref_frame'],
                     'user_video': user_skel, 'user_frame': f['user_frame'],
@@ -193,19 +224,24 @@ def analyze_for_ui(side_video=None, front_video=None, workdir="data/processed/_u
     return items, summary_md
 
 
-def analyze(side_video=None, front_video=None, workdir="data/processed/_user"):
-    """사용자 측면·정면 영상을 받아 전체 분석·피드백을 실행한다."""
-    print("스쿼트 자세 분석 시작...")
-    if side_video:
-        analyze_view(side_video, 'side', workdir)
-    if front_video:
-        analyze_view(front_video, 'front', workdir)
+def analyze(exercise='squat', side_video=None, front_video=None, workdir="data/processed/_user"):
+    """사용자 영상을 받아 전체 분석·피드백을 실행한다. exercise 가 지원하지 않는
+    뷰(예: lateral_raise 의 side_video)는 무시한다."""
+    print(f"{EXERCISE_KR[exercise]} 자세 분석 시작...")
+    videos = {'side': side_video, 'front': front_video}
+    for view in REFERENCE[exercise]:
+        video = videos.get(view)
+        if video:
+            analyze_view(video, exercise, view, workdir)
     print("\n분석 완료.")
 
 
 # ── 실행: 데모 (기준 원본 영상을 '사용자'로 넣어 전체 파이프라인 점검) ─────────
 if __name__ == "__main__":
     # 실제 사용자 영상이 없으므로 기준 원본을 사용자로 넣어본다.
-    # 사용자=기준이므로 '결함 없음(좋은 스쿼트)'이 나오면 전 과정이 정상.
-    analyze(side_video="data/raw/squat_side_raw.mp4",
+    # 사용자=기준이므로 '결함 없음(좋은 자세)'이 나오면 전 과정이 정상.
+    analyze(exercise='squat',
+            side_video="data/raw/squat_side_raw.mp4",
             front_video="data/raw/squat_front_raw.mp4")
+    analyze(exercise='lateral_raise',
+            front_video="data/raw/sidelateralraise_front_raw.mov")

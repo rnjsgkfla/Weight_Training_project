@@ -112,6 +112,8 @@ if __name__ == "__main__":
          "data/processed/squat_front_landmarks_smoothed.csv"),
         ("data/processed/squat_side_landmarks.csv",
          "data/processed/squat_side_landmarks_smoothed.csv"),
+        ("data/processed/sidelateralraise_front_landmarks.csv",
+         "data/processed/sidelateralraise_front_landmarks_smoothed.csv"),
     ]
 
     for input_csv, output_csv in jobs:

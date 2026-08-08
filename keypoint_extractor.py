@@ -132,6 +132,9 @@ if __name__ == "__main__":
         ("data/raw/squat_side_raw.mp4",
          "data/processed/squat_side_landmarks.csv",
          "data/processed/squat_side_skeleton.mp4"),
+        ("data/raw/sidelateralraise_front_raw.mov",
+         "data/processed/sidelateralraise_front_landmarks.csv",
+         "data/processed/sidelateralraise_front_skeleton.mp4"),
     ]
 
     for video_path, csv_path, output_video_path in jobs:

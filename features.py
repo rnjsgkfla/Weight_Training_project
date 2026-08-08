@@ -16,7 +16,7 @@ import numpy as np
 import csv
 from smooth_landmarks import load_landmarks
 from normalize_landmarks import _xyz
-from angles import (joint_angle, select_side, compute_angles,
+from angles import (joint_angle, angle_to_vertical, select_side, compute_angles,
                     LEFT, RIGHT, SQUAT_SIDE_ANGLES)
 
 
@@ -75,12 +75,58 @@ def extract_front_features(csv_path):
     return feats
 
 
+# ── 정면: 사이드레터럴레이즈 (좌우 개별 각도 + 좌우 높이차) ────────────────────
+def extract_front_lateral_raise_features(csv_path):
+    """정면 사이드레터럴레이즈 특징을 뽑는다. 정면이라 양팔 모두 그대로 쓴다
+    (측면처럼 카메라쪽 한쪽을 고를 필요가 없음 — 양팔이 항상 카메라를 향함).
+
+    좌우를 평균으로 뭉개지 않고 따로 남겨(arm_L/R, elbow_L/R) 어느 쪽이 문제인지
+    특정할 수 있게 하고, 대칭은 각도 차 대신 실제 높이차(손목·어깨 y)로 직접 잰다.
+    """
+    _, data = load_landmarks(csv_path)
+    x, y, z, v = _xyz(data)
+
+    def pt(i):
+        return np.stack([x[:, i], y[:, i]], axis=1)
+
+    feats = {}
+
+    # 좌우 어깨 외전각(거상각): 어깨→팔꿈치 분절이 수직축과 이루는 각.
+    # 0=팔을 내림, ~90=수평(목표 상단 자세)
+    feats['arm_L'] = angle_to_vertical(pt(LEFT['shoulder']), pt(LEFT['elbow']))
+    feats['arm_R'] = angle_to_vertical(pt(RIGHT['shoulder']), pt(RIGHT['elbow']))
+
+    # 좌우 팔꿈치 각도: 어깨-팔꿈치-손목. 살짝 굽힌 상태를 일정하게 유지해야 함.
+    feats['elbow_L'] = joint_angle(pt(LEFT['shoulder']), pt(LEFT['elbow']), pt(LEFT['wrist']))
+    feats['elbow_R'] = joint_angle(pt(RIGHT['shoulder']), pt(RIGHT['elbow']), pt(RIGHT['wrist']))
+
+    # 몸통 기울기: 골반중심→어깨중심 분절이 수직축과 이루는 각(정면이므로 좌우 기울임을 측정).
+    # 반동을 쓰려고 몸을 옆으로 기울이면 커진다.
+    hip_center  = (pt(LEFT['hip']) + pt(RIGHT['hip'])) / 2
+    sh_center   = (pt(LEFT['shoulder']) + pt(RIGHT['shoulder'])) / 2
+    feats['trunk'] = angle_to_vertical(hip_center, sh_center)
+
+    # 좌우 손목 높이(원점=골반, 아래로 갈수록 y 가 커짐 → 작을수록 높이 든 것).
+    # 좌우를 서로 비교(차이)하지 않고 각각 기준 영상의 같은 순간(DTW 정렬) 손목 높이와
+    # 직접 비교한다 — "반대쪽보다 낮다/높다"가 아니라 "그 손목이 기준보다 낮다/높다"를
+    # 바로 판정할 수 있어, 한쪽만 기준보다 과도하게 높이 든 경우도 곧바로 잡힌다.
+    feats['wrist_L'] = y[:, LEFT['wrist']]
+    feats['wrist_R'] = y[:, RIGHT['wrist']]
+
+    # 좌우 어깨 높이차(부호 있음, 위와 동일 규약): 한쪽 어깨만 으쓱 올라가거나 몸이
+    # 한쪽으로 기운 경우 감지.
+    feats['shoulder_height_diff'] = y[:, LEFT['shoulder']] - y[:, RIGHT['shoulder']]
+
+    return feats
+
+
 # ── 운동·뷰 선택 디스패처 ──────────────────────────────────────────────────────
 def extract_features(exercise, view, csv_path):
     """운동과 뷰를 고르면 해당 특징 시계열(dict)을 반환한다.
 
     - 스쿼트는 뷰별 전용 추출기(각도+위치, 비율)를 사용.
-    - 그 외 운동(팔굽혀펴기·사이드레터럴 등)은 아직 뷰 전용 로직이 없으므로
+    - 사이드레터럴레이즈는 정면 전용 추출기를 사용 (측면은 미지원).
+    - 그 외 운동(팔굽혀펴기 등)은 아직 뷰 전용 로직이 없으므로
       angles 엔진으로 그 운동의 '각도'만 계산해 돌려준다. (비율·위치 특징은
       해당 운동을 구현할 때 여기에 뷰 전용 추출기를 추가하면 된다.)
     """
@@ -91,6 +137,11 @@ def extract_features(exercise, view, csv_path):
         if view == 'front':
             return extract_front_features(csv_path)
         raise ValueError(f"스쿼트에 없는 뷰: {view}")
+
+    if exercise == 'lateral_raise':
+        if view == 'front':
+            return extract_front_lateral_raise_features(csv_path)
+        raise ValueError("사이드레터럴레이즈는 정면 영상만 지원합니다")
 
     # 각도만 필요한 운동은 angles 엔진으로 바로 (카메라쪽 자동 선택)
     from angles import angles_from_csv, exercise_angle_defs
@@ -158,3 +209,12 @@ if __name__ == "__main__":
     print(f"[정면] 최저점 frame={fb}")
     for name, s in front_feats.items():
         print(f"  {name:9s}: 서있음 {s[0]:7.3f}  →  최저점 {s[fb]:7.3f}")
+
+    lr_feats = extract_and_save(
+        'lateral_raise', 'front',
+        "data/processed/sidelateralraise_front_landmarks_normalized.csv",
+        "data/processed/sidelateralraise_front_features.csv")
+    peak = int(np.argmax((lr_feats['arm_L'] + lr_feats['arm_R']) / 2))
+    print(f"[사이드레터럴레이즈/정면] 최고점 frame={peak}")
+    for name, s in lr_feats.items():
+        print(f"  {name:14s}: 시작 {s[0]:7.2f}  →  최고점 {s[peak]:7.2f}")

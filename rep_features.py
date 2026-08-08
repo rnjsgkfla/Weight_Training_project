@@ -16,22 +16,23 @@ from rep_segmentation import segment
 from features import load_features
 
 
-def slice_reps(features_csv, smoothed_csv, **rep_kwargs):
+def slice_reps(features_csv, smoothed_csv, exercise='squat', **rep_kwargs):
     """반복 구간으로 특징 시계열을 잘라 반복별 로컬 시계열을 만든다.
 
     Args:
         features_csv : save_features 로 저장한 특징 CSV (정규화 기반)
         smoothed_csv : rep 분할용 랜드마크 CSV (정규화 전 smoothed)
+        exercise     : 운동 이름 (rep_segmentation.REP_SIGNAL_CONFIG 참고)
         rep_kwargs   : detect_reps 파라미터 (low_frac, high_frac, min_rep_frames)
 
     Returns:
         reps : 각 원소는 rep_segmentation 결과에 아래가 추가된 dict
                - 'features' : {특징이름: 그 rep 구간의 값 배열}
-               - 'bottom_rel': 잘린 구간 내에서의 최저점 인덱스 (0-based)
+               - 'bottom_rel': 잘린 구간 내에서의 극점 인덱스 (0-based)
                - 'length'   : 구간 프레임 수
-        leg  : 카메라쪽 다리
+        leg  : 카메라쪽 다리 (정면 양팔 운동은 None)
     """
-    reps, info, angle, leg = segment(smoothed_csv, **rep_kwargs)
+    reps, info, angle, leg = segment(smoothed_csv, exercise=exercise, **rep_kwargs)
     frames, feats = load_features(features_csv)
 
     # 프레임 수 정합 확인 (rep 분할 신호와 특징이 같은 프레임 수여야 인덱스가 맞다)
@@ -51,14 +52,17 @@ def slice_reps(features_csv, smoothed_csv, **rep_kwargs):
 # ── 실행: 정면/측면 반복별 특징 슬라이싱 (검증용) ──────────────────────────────
 if __name__ == "__main__":
     jobs = [
-        ('side',  "data/processed/squat_side_features.csv",
-                  "data/processed/squat_side_landmarks_smoothed.csv"),
-        ('front', "data/processed/squat_front_features.csv",
-                  "data/processed/squat_front_landmarks_smoothed.csv"),
+        ('squat', 'side',  "data/processed/squat_side_features.csv",
+                           "data/processed/squat_side_landmarks_smoothed.csv"),
+        ('squat', 'front', "data/processed/squat_front_features.csv",
+                           "data/processed/squat_front_landmarks_smoothed.csv"),
+        ('lateral_raise', 'front', "data/processed/sidelateralraise_front_features.csv",
+                                   "data/processed/sidelateralraise_front_landmarks_smoothed.csv"),
     ]
-    for tag, feat_csv, sm_csv in jobs:
-        reps, leg = slice_reps(feat_csv, sm_csv)
-        print(f"[{tag}] 카메라쪽={leg} | 반복 {len(reps)}개")
+    for exercise, tag, feat_csv, sm_csv in jobs:
+        reps, leg = slice_reps(feat_csv, sm_csv, exercise=exercise)
+        leg_label = leg if leg else "정면(양팔)"
+        print(f"[{exercise}/{tag}] {leg_label} | 반복 {len(reps)}개")
         for k, r in enumerate(reps, 1):
             names = list(r['features'])
             print(f"   {k}회차: 구간 f{r['start_f']}~f{r['end_f']} "

@@ -140,4 +140,8 @@ if __name__ == "__main__":
                   "data/processed/squat_side_landmarks_normalized.csv",
                   "data/raw/squat_side_raw.mp4", flip_side=True)
 
+    normalize_csv("data/processed/sidelateralraise_front_landmarks_smoothed.csv",
+                  "data/processed/sidelateralraise_front_landmarks_normalized.csv",
+                  "data/raw/sidelateralraise_front_raw.mov", flip_side=False)
+
     print("모든 정규화 완료.")
