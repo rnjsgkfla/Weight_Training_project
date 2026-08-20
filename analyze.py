@@ -38,6 +38,12 @@ REFERENCE = {
         'front': ("data/processed/sidelateralraise_front_features.csv",
                   "data/processed/sidelateralraise_front_landmarks_smoothed.csv"),
     },
+    'lunge': {
+        'side':  ("data/processed/lunge_side_features.csv",
+                  "data/processed/lunge_side_landmarks_smoothed.csv"),
+        'front': ("data/processed/lunge_front_features.csv",
+                  "data/processed/lunge_front_landmarks_smoothed.csv"),
+    },
 }
 
 # 기준 뼈대 영상 (비교 시각화용)
@@ -49,10 +55,17 @@ REFERENCE_SKELETON = {
     'lateral_raise': {
         'front': "data/processed/sidelateralraise_front_skeleton.mp4",
     },
+    'lunge': {
+        'side':  "data/processed/lunge_side_skeleton.mp4",
+        'front': "data/processed/lunge_front_skeleton.mp4",
+    },
 }
 
 # 운동 이름 (UI 표시용)
-EXERCISE_KR = {'squat': '스쿼트', 'lateral_raise': '사이드 레터럴 레이즈'}
+EXERCISE_KR = {'squat': '스쿼트', 'lateral_raise': '사이드 레터럴 레이즈', 'lunge': '런지'}
+
+# leg 가 None 일 때(카메라쪽 다리 고정 개념이 없는 운동) 보여줄 대체 라벨
+NEUTRAL_LEG_LABEL = {'lateral_raise': '정면(양팔)', 'lunge': '앞다리 자동판별(반복마다 다를 수 있음)'}
 
 # 특징 → 한글 짧은 이름 / 단위 (UI 표시용)
 FEATURE_KR = {
@@ -64,9 +77,11 @@ FEATURE_KR = {
     'elbow_L': '왼쪽 팔꿈치 각도', 'elbow_R': '오른쪽 팔꿈치 각도',
     'wrist_L': '왼쪽 손목 높이', 'wrist_R': '오른쪽 손목 높이',
     'shoulder_height_diff': '좌우 어깨 높이차',
+    'back_knee': '뒷다리 무릎 깊이',
 }
 FEATURE_UNIT = {'knee': '°', 'hip': '°', 'trunk': '°', 'shin': '°', 'sym_knee': '°',
-                'arm_L': '°', 'arm_R': '°', 'elbow_L': '°', 'elbow_R': '°'}
+                'arm_L': '°', 'arm_R': '°', 'elbow_L': '°', 'elbow_R': '°',
+                'back_knee': '°'}
 
 
 def get_fps(video_path):
@@ -108,7 +123,7 @@ def analyze_view(video_path, exercise, view, workdir="data/processed/_user"):
     ref_rep = load_reference_rep(exercise, view)
     user_reps, leg = process_user_video(video_path, exercise, view, workdir)
     fps = get_fps(video_path)
-    leg_label = leg if leg else "정면(양팔)"
+    leg_label = leg if leg else NEUTRAL_LEG_LABEL.get(exercise, "정면")
 
     print(f"\n===== [{EXERCISE_KR[exercise]}/{view.upper()}] {leg_label} | 반복 {len(user_reps)}회 =====")
     total_faults = 0
@@ -127,7 +142,7 @@ def run_analysis(video_path, exercise, view, workdir="data/processed/_user"):
     ref_rep = load_reference_rep(exercise, view)
     user_reps, leg = process_user_video(video_path, exercise, view, workdir)
     fps = get_fps(video_path)
-    leg_label = leg if leg else "정면(양팔)"
+    leg_label = leg if leg else NEUTRAL_LEG_LABEL.get(exercise, "정면")
 
     view_kr = '측면' if view == 'side' else '정면'
     lines = [f"### [{view_kr}] {leg_label} · 반복 {len(user_reps)}회"]
@@ -245,3 +260,6 @@ if __name__ == "__main__":
             front_video="data/raw/squat_front_raw.mp4")
     analyze(exercise='lateral_raise',
             front_video="data/raw/sidelateralraise_front_raw.mov")
+    analyze(exercise='lunge',
+            side_video="data/raw/lunge_side_raw.mp4",
+            front_video="data/raw/lunge_front_raw.mp4")

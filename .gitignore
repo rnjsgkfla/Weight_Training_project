@@ -13,7 +13,15 @@ __pycache__/
 # 파이프라인 생성물 (스크립트로 재생성 가능)
 data/processed/
 
+# 원본 영상: 런지 관련 파일만 포함
+data/raw/*
+!data/raw/lunge_front_raw.mp4
+!data/raw/lunge_side_raw.mp4
+
 # Claude Code 로컬 설정
 .claude/settings.local.json
+
+# 이전 clone 시도 잔여물
+clone-temp/
 
 *.mov

@@ -36,6 +36,7 @@ L_HIP, R_HIP = 23, 24
 REP_SIGNAL_CONFIG = {
     'squat':         dict(invert=False, refine_extreme='max'),
     'lateral_raise': dict(invert=True,  refine_extreme='min'),
+    'lunge':         dict(invert=True,  refine_extreme='max'),
 }
 
 
@@ -65,6 +66,16 @@ def rep_signal(csv_path, exercise='squat'):
         primary = (arm_L + arm_R) / 2
         refine = (y[:, LEFT['wrist']] + y[:, RIGHT['wrist']]) / 2
         leg = None  # 정면 양팔 운동은 카메라쪽 선택이 필요 없음
+    elif exercise == 'lunge':
+        # 런지는 rep 마다 앞다리가 바뀔 수 있어(제자리에서 앞/뒤 다리를 교체) '카메라쪽
+        # 다리의 무릎 각도' 같은 단일 다리 신호를 1차 신호로 못 쓴다. 대신 골반 y 는
+        # 어느 다리가 앞이든 내려앉을수록 항상 아래로(값 증가) 움직이므로 그대로 쓴다.
+        # (보조 신호도 같은 골반 y — 이미 위치 신호라 무릎각처럼 별도 교차검증 신호가
+        # 필요 없다.)
+        pelvis_y = (y[:, L_HIP] + y[:, R_HIP]) / 2
+        primary = pelvis_y
+        refine = pelvis_y
+        leg = None  # 앞다리가 rep 마다 바뀔 수 있어 고정된 '카메라쪽 다리' 개념이 없음
     else:
         raise ValueError(f"rep_signal 미지원 운동: {exercise}")
 
@@ -155,10 +166,12 @@ if __name__ == "__main__":
         ('squat', 'side',  "data/processed/squat_side_landmarks_smoothed.csv"),
         ('squat', 'front', "data/processed/squat_front_landmarks_smoothed.csv"),
         ('lateral_raise', 'front', "data/processed/sidelateralraise_front_landmarks_smoothed.csv"),
+        ('lunge', 'side',  "data/processed/lunge_side_landmarks_smoothed.csv"),
+        ('lunge', 'front', "data/processed/lunge_front_landmarks_smoothed.csv"),
     ]
     for exercise, tag, csv in jobs:
         reps, info, signal, leg = segment(csv, exercise=exercise)
-        leg_label = leg if leg else "정면(양팔)"
+        leg_label = leg if leg else "정면(양팔)/앞다리 자동판별"
         print(f"[{exercise}/{tag}] {leg_label} | 신호범위 {info['min']:.0f}~{info['max']:.0f}° "
               f"| 임계 T_down={info['T_down']:.0f}° T_up={info['T_up']:.0f}° "
               f"| 검출된 반복 {len(reps)}회")

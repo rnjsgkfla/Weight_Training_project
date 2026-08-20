@@ -121,9 +121,27 @@ LATERAL_RAISE_FAULT_RULES = {
     'shoulder_height_diff': ('asym',      0.06, _height_diff_msg('어깨')),
 }
 
+LUNGE_FAULT_RULES = {
+    # 측면 (앞다리/뒷다리 역할 기반 — features.py 참고)
+    # knee/hip_depth/knee_travel 허용오차는 스쿼트보다 넉넉하다: 기준 측면 영상이
+    # 카메라 반대쪽(먼 쪽) 다리의 MediaPipe 인식률이 낮아(무릎 visibility 0.81,
+    # 스쿼트급 0.98 대비) 그 다리가 앞다리로 잡히는 반복마다 편차가 커지는 걸
+    # 확인했다(자체검증: 최대 knee +43°, knee_travel +1.00). 카메라를 정면(양다리
+    # 사이) 쪽으로 옮겨 재촬영하면 더 좁혀도 된다.
+    'knee':        ('high_bad', 25.0, '앞무릎을 더 굽혀 깊이 앉으세요 (런지가 얕습니다)'),
+    'back_knee':   ('high_bad', 20.0, '뒷다리를 충분히 낮추지 않았습니다 (뒷무릎을 더 굽히세요)'),
+    'hip_depth':   ('high_bad', 0.45, '엉덩이를 더 낮추세요 (앞허벅지가 바닥과 평행이 되도록)'),
+    'trunk':       ('high_bad', 12.0, '상체가 과도하게 앞/옆으로 기울어집니다'),
+    'knee_travel': ('high_bad', 0.65, '앞무릎이 앞발끝을 너무 넘어갑니다'),
+    # 정면
+    'valgus':      ('high_bad', 0.12, '앞무릎이 안쪽으로 모입니다 (무릎을 발끝 방향으로 미세요)'),
+    'sym_hip':     ('high_bad', 0.12, '골반이 한쪽으로 기웁니다'),
+}
+
 FAULT_RULES_BY_EXERCISE = {
     'squat':         SQUAT_FAULT_RULES,
     'lateral_raise': LATERAL_RAISE_FAULT_RULES,
+    'lunge':         LUNGE_FAULT_RULES,
 }
 
 # 이전 코드 호환용 별칭 (기본값 = 스쿼트 규칙)
@@ -133,6 +151,7 @@ FAULT_RULES = SQUAT_FAULT_RULES
 PHASE_LABELS = {
     'squat':         ('하강', '최저', '상승'),
     'lateral_raise': ('올리기', '최고점', '내리기'),
+    'lunge':         ('하강', '최저', '상승'),
 }
 
 
@@ -353,4 +372,78 @@ if __name__ == "__main__":
     lbad['features']['wrist_R'] = lbad['features']['wrist_R'].copy()
     lbad['features']['wrist_R'][max(0, b - 10):b + 10] -= 0.3
     faults, _ = judge_rep(lref, lbad, exercise='lateral_raise')
+    print(format_feedback(faults))
+
+    # ── 런지: 정상 사용자 + 규칙별 인위적 나쁜 자세 주입 (규칙이 실제로 발동하는지 확인) ──
+    lg_side_reps, _ = slice_reps("data/processed/lunge_side_features.csv",
+                                  "data/processed/lunge_side_landmarks_smoothed.csv",
+                                  exercise='lunge')
+    lg_ref = lg_side_reps[0]
+    lg_front_reps, _ = slice_reps("data/processed/lunge_front_features.csv",
+                                   "data/processed/lunge_front_landmarks_smoothed.csv",
+                                   exercise='lunge')
+    lg_fref = lg_front_reps[0]
+
+    print("\n⑪ 런지 정상 사용자 (기준과 동일, 측면) → 결함 없어야 함:")
+    faults, _ = judge_rep(lg_ref, copy.deepcopy(lg_ref), exercise='lunge')
+    print(format_feedback(faults))
+
+    print("\n⑫ 앞무릎 얕음 주입 (최저점 구간 knee +30°, '깊이 앉으세요' 나와야 함):")
+    bad = copy.deepcopy(lg_ref)
+    b = bad['bottom_rel']
+    bad['features']['knee'] = bad['features']['knee'].copy()
+    bad['features']['knee'][max(0, b - 8):b + 8] += 30.0
+    faults, _ = judge_rep(lg_ref, bad, exercise='lunge')
+    print(format_feedback(faults))
+
+    print("\n⑬ 뒷다리 안 낮춤 주입 (최저점 구간 back_knee +30°, '뒷무릎을 더 굽히세요' 나와야 함):")
+    bad = copy.deepcopy(lg_ref)
+    b = bad['bottom_rel']
+    bad['features']['back_knee'] = bad['features']['back_knee'].copy()
+    bad['features']['back_knee'][max(0, b - 8):b + 8] += 30.0
+    faults, _ = judge_rep(lg_ref, bad, exercise='lunge')
+    print(format_feedback(faults))
+
+    print("\n⑭ 엉덩이 얕음 주입 (최저점 구간 hip_depth +0.5, '엉덩이를 더 낮추세요' 나와야 함):")
+    bad = copy.deepcopy(lg_ref)
+    b = bad['bottom_rel']
+    bad['features']['hip_depth'] = bad['features']['hip_depth'].copy()
+    bad['features']['hip_depth'][max(0, b - 8):b + 8] += 0.5
+    faults, _ = judge_rep(lg_ref, bad, exercise='lunge')
+    print(format_feedback(faults))
+
+    print("\n⑮ 상체 과숙임 주입 (상승 구간 trunk +20°, '앞/옆으로 기울어집니다' 나와야 함):")
+    bad = copy.deepcopy(lg_ref)
+    b = bad['bottom_rel']
+    bad['features']['trunk'] = bad['features']['trunk'].copy()
+    bad['features']['trunk'][b:] += 20.0
+    faults, _ = judge_rep(lg_ref, bad, exercise='lunge')
+    print(format_feedback(faults))
+
+    print("\n⑯ 무릎 전방이동 과다 주입 (최저점 구간 knee_travel +0.8, '앞발끝을 너무 넘어갑니다' 나와야 함):")
+    bad = copy.deepcopy(lg_ref)
+    b = bad['bottom_rel']
+    bad['features']['knee_travel'] = bad['features']['knee_travel'].copy()
+    bad['features']['knee_travel'][max(0, b - 8):b + 8] += 0.8
+    faults, _ = judge_rep(lg_ref, bad, exercise='lunge')
+    print(format_feedback(faults))
+
+    print("\n⑰ 런지 정면 정상 사용자 (기준과 동일) → 결함 없어야 함:")
+    faults, _ = judge_rep(lg_fref, copy.deepcopy(lg_fref), exercise='lunge')
+    print(format_feedback(faults))
+
+    print("\n⑱ 정면 무릎 모임(valgus) 주입 (최저점 구간 valgus +0.3, '안쪽으로 모입니다' 나와야 함):")
+    bad = copy.deepcopy(lg_fref)
+    b = bad['bottom_rel']
+    bad['features']['valgus'] = bad['features']['valgus'].copy()
+    bad['features']['valgus'][max(0, b - 8):b + 8] += 0.3
+    faults, _ = judge_rep(lg_fref, bad, exercise='lunge')
+    print(format_feedback(faults))
+
+    print("\n⑲ 정면 골반 기울임 주입 (최저점 구간 sym_hip +0.2, '골반이 한쪽으로 기웁니다' 나와야 함):")
+    bad = copy.deepcopy(lg_fref)
+    b = bad['bottom_rel']
+    bad['features']['sym_hip'] = bad['features']['sym_hip'].copy()
+    bad['features']['sym_hip'][max(0, b - 8):b + 8] += 0.2
+    faults, _ = judge_rep(lg_fref, bad, exercise='lunge')
     print(format_feedback(faults))

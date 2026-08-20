@@ -14,6 +14,7 @@ features.py — 스쿼트 특징 추출: 측면 각도 + 정면 비율
 
 import numpy as np
 import csv
+from scipy.ndimage import median_filter
 from smooth_landmarks import load_landmarks
 from normalize_landmarks import _xyz
 from angles import (joint_angle, angle_to_vertical, select_side, compute_angles,
@@ -120,6 +121,99 @@ def extract_front_lateral_raise_features(csv_path):
     return feats
 
 
+# ── 런지: 앞다리/뒷다리 '역할' 판별 (좌우 고정 선택이 아니라 rep 마다 바뀔 수 있음) ──
+def _role_front_is_left(diff, win=21):
+    """좌/우 신호차(diff)의 부호로 앞다리를 판별한다. 최저점 부근에서 두 다리가
+    화면상 가까워지며 diff 가 순간적으로 흔들리거나 부호가 잠깐 뒤집힐 수 있어,
+    median filter 로 다듬은 뒤 부호를 본다 (짧은 흔들림은 죽이고, rep 이 바뀌며
+    실제로 앞다리가 바뀌는 구간은 충분히 길어 살아남는다)."""
+    win = min(win, len(diff) if len(diff) % 2 == 1 else len(diff) - 1)
+    win = max(win, 1)
+    return median_filter(diff, size=win) > 0
+
+
+# ── 측면: 런지 (앞다리 무릎 깊이 + 뒷다리 무릎 + 몸통 기울기 + 위치 특징 2종) ──────
+def extract_side_features_lunge(csv_path):
+    """측면 런지 특징. 스쿼트처럼 '카메라쪽 다리 1개'를 고르는 게 아니라, 앞다리와
+    뒷다리가 화면에 나란히 분리돼 보이므로 '앞다리/뒷다리' 역할로 특징을 뽑는다.
+    이름은 스쿼트와 맞춰(knee/hip_depth/trunk/knee_travel) 판정 규칙·UI 라벨을 재사용한다.
+    앞다리 판별: 발끝 방향(x, flip_side 로 항상 +x)에서 더 앞선 발목 쪽.
+    """
+    _, data = load_landmarks(csv_path)
+    x, y, z, v = _xyz(data)
+
+    front_is_L = _role_front_is_left(x[:, LEFT['ankle']] - x[:, RIGHT['ankle']])
+
+    def pick(arr_l, arr_r):
+        return np.where(front_is_L, arr_l, arr_r)
+
+    knee_L = joint_angle(_pt(x, y, LEFT['hip']),  _pt(x, y, LEFT['knee']),  _pt(x, y, LEFT['ankle']))
+    knee_R = joint_angle(_pt(x, y, RIGHT['hip']), _pt(x, y, RIGHT['knee']), _pt(x, y, RIGHT['ankle']))
+
+    feats = {}
+    feats['knee'] = pick(knee_L, knee_R)        # 앞다리 무릎 굽힘 각도 (깊이 지표, 목표 ~90도)
+    feats['back_knee'] = pick(knee_R, knee_L)   # 뒷다리 무릎 굽힘 각도
+
+    pelvis_cx = (x[:, LEFT['hip']] + x[:, RIGHT['hip']]) / 2
+    pelvis_cy = (y[:, LEFT['hip']] + y[:, RIGHT['hip']]) / 2
+    sh_cx = (x[:, LEFT['shoulder']] + x[:, RIGHT['shoulder']]) / 2
+    sh_cy = (y[:, LEFT['shoulder']] + y[:, RIGHT['shoulder']]) / 2
+    # 몸통 기울기는 어깨중심-골반중심(양다리 공용 중심점)으로 계산한다 —
+    # 스쿼트처럼 한쪽 다리의 hip 랜드마크에 묶으면 어느 다리가 앞인지에 따라
+    # 값이 갈릴 이유가 없는 신호라 중심점이 더 안정적이다.
+    feats['trunk'] = angle_to_vertical(np.stack([pelvis_cx, pelvis_cy], axis=1),
+                                        np.stack([sh_cx, sh_cy], axis=1))
+
+    front_knee_x = pick(x[:, LEFT['knee']], x[:, RIGHT['knee']])
+    front_knee_y = pick(y[:, LEFT['knee']], y[:, RIGHT['knee']])
+    front_foot_x = pick(x[:, LEFT['foot']], x[:, RIGHT['foot']])
+
+    # 엉덩이 깊이: 앞무릎.y − 골반중심.y (스쿼트 hip_depth 와 동일한 부호 규약)
+    feats['hip_depth'] = front_knee_y - pelvis_cy
+    # 무릎 전방 이동: 앞무릎.x − 앞발끝.x. >0 이면 앞무릎이 앞발끝보다 앞.
+    feats['knee_travel'] = front_knee_x - front_foot_x
+
+    return feats
+
+
+# ── 정면: 런지 (앞무릎 모임 + 몸통 좌우 기울기 + 골반 수평) ───────────────────────
+def extract_front_features_lunge(csv_path):
+    """정면 런지 특징. 정면에서는 앞/뒤 스탠스 간격이 원근에 묻혀 x 로는 잘 안 보이므로,
+    앞다리는 카메라와의 거리(z, 가까울수록 더 작은/음수 값)로 판별한다.
+    """
+    _, data = load_landmarks(csv_path)
+    x, y, z, v = _xyz(data)
+
+    front_is_L = _role_front_is_left(z[:, RIGHT['ankle']] - z[:, LEFT['ankle']])
+
+    def pick(arr_l, arr_r):
+        return np.where(front_is_L, arr_l, arr_r)
+
+    feats = {}
+
+    # 무릎 모임(valgus 유사): 앞무릎이 앞발목보다 몸 중심선 쪽으로 쏠리면 값이 커진다
+    # (0 근처=발목 위, 양수=안쪽 모임). 어느 쪽 다리가 앞이든(좌/우 무관) 같은 부호가
+    # 되도록 '중심선 방향'을 기준으로 부호를 맞춘다(좌우 스크린 위치와 무관).
+    ankle_x_L, ankle_x_R = x[:, LEFT['ankle']], x[:, RIGHT['ankle']]
+    centerline_x = (ankle_x_L + ankle_x_R) / 2
+    front_ankle_x = pick(ankle_x_L, ankle_x_R)
+    front_knee_x  = pick(x[:, LEFT['knee']], x[:, RIGHT['knee']])
+    inward_dir = np.sign(centerline_x - front_ankle_x)
+    feats['valgus'] = (front_knee_x - front_ankle_x) * inward_dir
+
+    pelvis_cx = (x[:, LEFT['hip']] + x[:, RIGHT['hip']]) / 2
+    pelvis_cy = (y[:, LEFT['hip']] + y[:, RIGHT['hip']]) / 2
+    sh_cx = (x[:, LEFT['shoulder']] + x[:, RIGHT['shoulder']]) / 2
+    sh_cy = (y[:, LEFT['shoulder']] + y[:, RIGHT['shoulder']]) / 2
+    feats['trunk'] = angle_to_vertical(np.stack([pelvis_cx, pelvis_cy], axis=1),
+                                        np.stack([sh_cx, sh_cy], axis=1))
+
+    # 골반 수평: 스쿼트와 동일 (앞/뒤 다리 역할과 무관하게 좌우 골반 높이차)
+    feats['sym_hip'] = np.abs(y[:, LEFT['hip']] - y[:, RIGHT['hip']])
+
+    return feats
+
+
 # ── 운동·뷰 선택 디스패처 ──────────────────────────────────────────────────────
 def extract_features(exercise, view, csv_path):
     """운동과 뷰를 고르면 해당 특징 시계열(dict)을 반환한다.
@@ -142,6 +236,13 @@ def extract_features(exercise, view, csv_path):
         if view == 'front':
             return extract_front_lateral_raise_features(csv_path)
         raise ValueError("사이드레터럴레이즈는 정면 영상만 지원합니다")
+
+    if exercise == 'lunge':
+        if view == 'side':
+            return extract_side_features_lunge(csv_path)
+        if view == 'front':
+            return extract_front_features_lunge(csv_path)
+        raise ValueError(f"런지에 없는 뷰: {view}")
 
     # 각도만 필요한 운동은 angles 엔진으로 바로 (카메라쪽 자동 선택)
     from angles import angles_from_csv, exercise_angle_defs
@@ -218,3 +319,18 @@ if __name__ == "__main__":
     print(f"[사이드레터럴레이즈/정면] 최고점 frame={peak}")
     for name, s in lr_feats.items():
         print(f"  {name:14s}: 시작 {s[0]:7.2f}  →  최고점 {s[peak]:7.2f}")
+
+    lunge_side_feats = extract_and_save(
+        'lunge', 'side',
+        "data/processed/lunge_side_landmarks_normalized.csv",
+        "data/processed/lunge_side_features.csv")
+    lb = int(np.argmin(lunge_side_feats['knee']))  # 앞무릎 각도 최소 = 최저점
+    print(f"[런지/측면] 최저점 frame={lb}")
+    for name, s in lunge_side_feats.items():
+        unit = 'deg' if name in ('knee', 'back_knee', 'trunk') else '   '
+        print(f"  {name:11s}: 서있음 {s[0]:7.2f}{unit}  →  최저점 {s[lb]:7.2f}{unit}")
+
+    extract_and_save(
+        'lunge', 'front',
+        "data/processed/lunge_front_landmarks_normalized.csv",
+        "data/processed/lunge_front_features.csv")
