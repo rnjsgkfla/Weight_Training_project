@@ -106,16 +106,9 @@ def smooth_csv(input_csv, output_csv, window_length=7, polyorder=2):
 
 
 # ── 실행: 정면 / 측면 랜드마크 스무딩 ──────────────────────────────────────────
-if __name__ == "__main__":
-    jobs = [
-        ("data/processed/squat_front_landmarks.csv",
-         "data/processed/squat_front_landmarks_smoothed.csv"),
-        ("data/processed/squat_side_landmarks.csv",
-         "data/processed/squat_side_landmarks_smoothed.csv"),
-        ("data/processed/sidelateralraise_front_landmarks.csv",
-         "data/processed/sidelateralraise_front_landmarks_smoothed.csv"),
-    ]
 
-    for input_csv, output_csv in jobs:
-        smooth_csv(input_csv, output_csv)
-    print("모든 스무딩 완료.")
+
+if __name__ == "__main__":
+    # 기준 데이터는 개별 스테이지를 따로 돌리지 않고 build_references.py 로 한 번에 생성한다
+    # (원본 영상 → 이 스테이지들을 운동·뷰별로 순서대로 호출).
+    print("기준 데이터 생성은 build_references.py 를 사용하세요:  python build_references.py")

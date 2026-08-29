@@ -131,17 +131,9 @@ def normalize_csv(input_csv, output_csv, video_path, flip_side=False):
 # ── 실행: 정면 / 측면 정규화 ───────────────────────────────────────────────────
 # 해상도는 각 원본 영상에서 자동 감지되므로 하드코딩하지 않는다.
 # 사용자 영상도 동일하게 (CSV, 출력, 그 영상 경로) 만 넘기면 된다.
+
+
 if __name__ == "__main__":
-    normalize_csv("data/processed/squat_front_landmarks_smoothed.csv",
-                  "data/processed/squat_front_landmarks_normalized.csv",
-                  "data/raw/squat_front_raw.mp4", flip_side=False)
-
-    normalize_csv("data/processed/squat_side_landmarks_smoothed.csv",
-                  "data/processed/squat_side_landmarks_normalized.csv",
-                  "data/raw/squat_side_raw.mp4", flip_side=True)
-
-    normalize_csv("data/processed/sidelateralraise_front_landmarks_smoothed.csv",
-                  "data/processed/sidelateralraise_front_landmarks_normalized.csv",
-                  "data/raw/sidelateralraise_front_raw.mov", flip_side=False)
-
-    print("모든 정규화 완료.")
+    # 기준 데이터는 개별 스테이지를 따로 돌리지 않고 build_references.py 로 한 번에 생성한다
+    # (원본 영상 → 이 스테이지들을 운동·뷰별로 순서대로 호출).
+    print("기준 데이터 생성은 build_references.py 를 사용하세요:  python build_references.py")

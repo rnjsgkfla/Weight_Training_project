@@ -124,20 +124,9 @@ def extract_keypoints(video_path, csv_path, output_video_path):
 
 
 # ── 실행: 정면 / 측면 전처리 영상에서 관절 추출 ────────────────────────────────
+
+
 if __name__ == "__main__":
-    jobs = [
-        ("data/raw/squat_front_raw.mp4",
-         "data/processed/squat_front_landmarks.csv",
-         "data/processed/squat_front_skeleton.mp4"),
-        ("data/raw/squat_side_raw.mp4",
-         "data/processed/squat_side_landmarks.csv",
-         "data/processed/squat_side_skeleton.mp4"),
-        ("data/raw/sidelateralraise_front_raw.mov",
-         "data/processed/sidelateralraise_front_landmarks.csv",
-         "data/processed/sidelateralraise_front_skeleton.mp4"),
-    ]
-
-    for video_path, csv_path, output_video_path in jobs:
-        extract_keypoints(video_path, csv_path, output_video_path)
-
-    print("모든 관절 추출 완료.")
+    # 기준 데이터는 개별 스테이지를 따로 돌리지 않고 build_references.py 로 한 번에 생성한다
+    # (원본 영상 → 이 스테이지들을 운동·뷰별로 순서대로 호출).
+    print("기준 데이터 생성은 build_references.py 를 사용하세요:  python build_references.py")

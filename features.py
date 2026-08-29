@@ -286,51 +286,9 @@ def extract_and_save(exercise, view, input_csv, output_csv):
 
 
 # ── 실행: 정면/측면 특징 추출 → CSV 저장 (+ 검증용 요약) ───────────────────────
+
+
 if __name__ == "__main__":
-    side_feats = extract_and_save(
-        'squat', 'side',
-        "data/processed/squat_side_landmarks_normalized.csv",
-        "data/processed/squat_side_features.csv")
-    b = int(np.argmin(side_feats['knee']))  # 무릎 각도 최소 = 최저점
-    print(f"[측면] 최저점 frame={b}")
-    for name, s in side_feats.items():
-        unit = 'deg' if name in ('knee', 'hip', 'trunk', 'shin') else '   '
-        print(f"  {name:11s}: 서있음 {s[0]:7.2f}{unit}  →  최저점 {s[b]:7.2f}{unit}")
-
-    front_feats = extract_and_save(
-        'squat', 'front',
-        "data/processed/squat_front_landmarks_normalized.csv",
-        "data/processed/squat_front_features.csv")
-    # 정면 최저점: 좌우 무릎각 평균 최소 지점 근사
-    _, fdata = load_landmarks("data/processed/squat_front_landmarks_normalized.csv")
-    fx, fy, _, _ = _xyz(fdata)
-    kL = joint_angle(_pt(fx, fy, LEFT['hip']),  _pt(fx, fy, LEFT['knee']),  _pt(fx, fy, LEFT['ankle']))
-    kR = joint_angle(_pt(fx, fy, RIGHT['hip']), _pt(fx, fy, RIGHT['knee']), _pt(fx, fy, RIGHT['ankle']))
-    fb = int(np.argmin((kL + kR) / 2))
-    print(f"[정면] 최저점 frame={fb}")
-    for name, s in front_feats.items():
-        print(f"  {name:9s}: 서있음 {s[0]:7.3f}  →  최저점 {s[fb]:7.3f}")
-
-    lr_feats = extract_and_save(
-        'lateral_raise', 'front',
-        "data/processed/sidelateralraise_front_landmarks_normalized.csv",
-        "data/processed/sidelateralraise_front_features.csv")
-    peak = int(np.argmax((lr_feats['arm_L'] + lr_feats['arm_R']) / 2))
-    print(f"[사이드레터럴레이즈/정면] 최고점 frame={peak}")
-    for name, s in lr_feats.items():
-        print(f"  {name:14s}: 시작 {s[0]:7.2f}  →  최고점 {s[peak]:7.2f}")
-
-    lunge_side_feats = extract_and_save(
-        'lunge', 'side',
-        "data/processed/lunge_side_landmarks_normalized.csv",
-        "data/processed/lunge_side_features.csv")
-    lb = int(np.argmin(lunge_side_feats['knee']))  # 앞무릎 각도 최소 = 최저점
-    print(f"[런지/측면] 최저점 frame={lb}")
-    for name, s in lunge_side_feats.items():
-        unit = 'deg' if name in ('knee', 'back_knee', 'trunk') else '   '
-        print(f"  {name:11s}: 서있음 {s[0]:7.2f}{unit}  →  최저점 {s[lb]:7.2f}{unit}")
-
-    extract_and_save(
-        'lunge', 'front',
-        "data/processed/lunge_front_landmarks_normalized.csv",
-        "data/processed/lunge_front_features.csv")
+    # 기준 데이터는 개별 스테이지를 따로 돌리지 않고 build_references.py 로 한 번에 생성한다
+    # (원본 영상 → 이 스테이지들을 운동·뷰별로 순서대로 호출).
+    print("기준 데이터 생성은 build_references.py 를 사용하세요:  python build_references.py")
