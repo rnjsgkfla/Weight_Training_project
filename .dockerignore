@@ -1,0 +1,19 @@
+# 가상환경·캐시 (이미지에 불필요, 빌드 컨텍스트 대폭 축소)
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# git·에디터·OS
+.git/
+.gitignore
+.claude/
+.DS_Store
+clone-temp/
+
+# 파이프라인 생성물 (이미지 빌드 시 build_references.py 로 재생성)
+data/processed/
+
+# 임시 원본 (사레레 .mov 등)
+*.mov
