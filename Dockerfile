@@ -20,6 +20,10 @@ COPY . .
 # 원본 영상에서 재생성해 이미지 안에 굽는다 (스쿼트·런지, 사레레는 원본 없어 건너뜀).
 RUN python build_references.py
 
+# 런타임은 비루트 사용자로 (컨테이너 권한 오남용 위험 완화). /app 소유권도 넘긴다.
+RUN useradd --create-home appuser && chown -R appuser:appuser /app
+USER appuser
+
 # Cloud Run 은 PORT 환경변수를 주입한다 (기본 8080). 0.0.0.0 바인딩 필수.
 ENV PORT=8080
 CMD ["sh", "-c", "exec uvicorn api:app --host 0.0.0.0 --port ${PORT}"]

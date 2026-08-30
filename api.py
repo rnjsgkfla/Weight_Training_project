@@ -19,6 +19,7 @@ import shutil
 
 import cv2
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from analyze import analyze_for_ui, frame_at, REFERENCE, EXERCISE_KR
@@ -32,8 +33,8 @@ class FeedbackItem(BaseModel):
     label: str          # 목록에 표시할 이름
     detail: str         # 상세 설명 (markdown)
     ok: bool            # 결함 없이 양호한 항목이면 True
-    ref_image: str | None   # 모범 자세 프레임 (data:image/png;base64,...)
-    user_image: str | None  # 내 자세 프레임 (data:image/png;base64,...)
+    ref_image: str | None   # 모범 자세 프레임 (data:image/jpeg;base64,...)
+    user_image: str | None  # 내 자세 프레임 (data:image/jpeg;base64,...)
 
 
 class AnalyzeResponse(BaseModel):
@@ -59,12 +60,34 @@ def _img_data_uri(video_path, frame_number):
 
 
 async def _save_upload(upload, workdir, view):
-    """업로드 파일을 작업폴더에 저장하고 경로를 반환한다."""
+    """업로드 파일을 작업폴더에 저장하고 경로를 반환한다.
+
+    큰 영상도 메모리에 통째로 올리지 않도록 1MB 청크로 스트리밍 저장한다.
+    """
     ext = os.path.splitext(upload.filename or "")[1] or ".mp4"
     path = os.path.join(workdir, f"user_{view}{ext}")
     with open(path, "wb") as f:
-        f.write(await upload.read())
+        while chunk := await upload.read(1024 * 1024):
+            f.write(chunk)
     return path
+
+
+def _analyze_and_encode(exercise, side_path, front_path, workdir):
+    """무거운 동기 작업(분석 파이프라인 + 프레임 인코딩)을 한 함수로 묶는다.
+
+    OpenCV/MediaPipe 는 CPU·IO 를 오래 잡는 동기 코드라, 엔드포인트에서 이 함수를
+    스레드풀로 오프로드해 이벤트 루프가 막히지 않게 한다.
+    """
+    items, summary = analyze_for_ui(exercise, side_path, front_path, workdir=workdir)
+    out_items = [
+        FeedbackItem(
+            key=it["key"], label=it["label"], detail=it["detail"], ok=it["ok"],
+            ref_image=_img_data_uri(it["ref_video"], it["ref_frame"]),
+            user_image=_img_data_uri(it["user_video"], it["user_frame"]),
+        )
+        for it in items
+    ]
+    return summary, out_items
 
 
 # ── 엔드포인트 ─────────────────────────────────────────────────────────────────
@@ -94,30 +117,30 @@ async def analyze(
     if exercise not in REFERENCE:
         raise HTTPException(status_code=400,
                             detail=f"지원하지 않는 운동입니다: {exercise} (가능: {list(REFERENCE)})")
-    if side_video is None and front_video is None:
-        raise HTTPException(status_code=400, detail="측면 또는 정면 영상을 하나 이상 올려주세요.")
 
     workdir = tempfile.mkdtemp(prefix="pose_")
     try:
-        side_path = await _save_upload(side_video, workdir, "side") if side_video else None
-        front_path = await _save_upload(front_video, workdir, "front") if front_video else None
+        # 이 운동이 실제로 쓰는 뷰의 영상만 저장한다 (예: 사이드레터럴레이즈는 정면만).
+        supported = REFERENCE[exercise]
+        paths = {}
+        for view, upload in (("side", side_video), ("front", front_video)):
+            if upload is not None and view in supported:
+                paths[view] = await _save_upload(upload, workdir, view)
+        if not paths:
+            raise HTTPException(status_code=400,
+                                detail=f"'{EXERCISE_KR.get(exercise, exercise)}'에 필요한 뷰"
+                                       f"({', '.join(supported)}) 영상을 하나 이상 올려주세요.")
 
         try:
-            items, summary = analyze_for_ui(exercise, side_path, front_path, workdir=workdir)
+            # 무거운 동기 작업은 스레드풀로 오프로드 (이벤트 루프 블로킹 방지)
+            summary, out_items = await run_in_threadpool(
+                _analyze_and_encode, exercise, paths.get("side"), paths.get("front"), workdir)
         except FileNotFoundError:
             # 기준(모범) 데이터가 아직 준비 안 된 운동 (예: 사이드레터럴레이즈 원본 미포함)
             raise HTTPException(
                 status_code=503,
                 detail=f"'{EXERCISE_KR.get(exercise, exercise)}' 기준 데이터가 아직 준비되지 않았습니다.")
 
-        out_items = [
-            FeedbackItem(
-                key=it["key"], label=it["label"], detail=it["detail"], ok=it["ok"],
-                ref_image=_img_data_uri(it["ref_video"], it["ref_frame"]),
-                user_image=_img_data_uri(it["user_video"], it["user_frame"]),
-            )
-            for it in items
-        ]
         return AnalyzeResponse(exercise=exercise, summary=summary, items=out_items)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
