@@ -1,0 +1,9 @@
+# xcodegen 이 project.yml 에서 생성 (xcodegen generate 로 재생성 가능)
+PoseFeedback.xcodeproj/
+
+# Xcode 빌드 산출물 / 사용자별 상태
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+.DS_Store
