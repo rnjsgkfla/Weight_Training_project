@@ -26,6 +26,11 @@ from analyze import analyze_for_ui, frame_at, REFERENCE, EXERCISE_KR
 
 app = FastAPI(title="운동 자세 피드백 API", version="0.1.0")
 
+# 업로드 최대 크기 (스쿼트 몇 회 영상이면 보통 수십 MB 이내). 초과 시 413 으로 거부해
+# 거대 파일이 디스크를 채우는 것을 막는다.
+MAX_UPLOAD_MB = 100
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
 
 # ── 응답 스키마 ────────────────────────────────────────────────────────────────
 class FeedbackItem(BaseModel):
@@ -62,12 +67,19 @@ def _img_data_uri(video_path, frame_number):
 async def _save_upload(upload, workdir, view):
     """업로드 파일을 작업폴더에 저장하고 경로를 반환한다.
 
-    큰 영상도 메모리에 통째로 올리지 않도록 1MB 청크로 스트리밍 저장한다.
+    큰 영상도 메모리에 통째로 올리지 않도록 1MB 청크로 스트리밍 저장하고,
+    누적 크기가 MAX_UPLOAD_BYTES 를 넘으면 413 으로 거부한다(디스크 고갈 방지).
     """
     ext = os.path.splitext(upload.filename or "")[1] or ".mp4"
     path = os.path.join(workdir, f"user_{view}{ext}")
+    written = 0
     with open(path, "wb") as f:
         while chunk := await upload.read(1024 * 1024):
+            written += len(chunk)
+            if written > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"영상이 너무 큽니다. {MAX_UPLOAD_MB}MB 이하로 올려주세요.")
             f.write(chunk)
     return path
 
