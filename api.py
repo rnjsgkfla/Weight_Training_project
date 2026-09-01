@@ -135,6 +135,9 @@ async def analyze(
             # 무거운 동기 작업은 스레드풀로 오프로드 (이벤트 루프 블로킹 방지)
             summary, out_items = await run_in_threadpool(
                 _analyze_and_encode, exercise, paths.get("side"), paths.get("front"), workdir)
+        except ValueError as e:
+            # 읽을 수 없는/빈 영상 등 잘못된 입력 → 사용자 잘못이므로 400
+            raise HTTPException(status_code=400, detail=str(e))
         except FileNotFoundError:
             # 기준(모범) 데이터가 아직 준비 안 된 운동 (예: 사이드레터럴레이즈 원본 미포함)
             raise HTTPException(

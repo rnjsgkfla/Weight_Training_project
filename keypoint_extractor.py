@@ -43,8 +43,9 @@ def extract_keypoints(video_path, csv_path, output_video_path):
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print(f"에러: '{video_path}' 영상을 불러올 수 없습니다.")
-        return
+        # 조용히 return 하면 뒤 단계에서 엉뚱한 오류(FileNotFoundError)로 번지므로,
+        # 여기서 명확한 예외를 던져 호출측(api.py)이 400 으로 응답하게 한다.
+        raise ValueError(f"영상을 읽을 수 없습니다(형식 손상 또는 미지원 코덱): {os.path.basename(video_path)}")
 
     # 원본 FPS 를 그대로 사용하여 결과 영상 재생 속도를 입력과 동일하게 유지한다.
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -120,6 +121,9 @@ def extract_keypoints(video_path, csv_path, output_video_path):
     if out is not None:
         out.release()
     pose.close()
+    if frame_count == 0:
+        # 열리긴 했으나 읽을 프레임이 하나도 없는 빈/손상 영상
+        raise ValueError(f"영상에서 프레임을 읽지 못했습니다(빈 영상): {os.path.basename(video_path)}")
     print(f"분석 완료: 좌표 → '{csv_path}', 뼈대 영상 → '{output_video_path}'\n")
 
 

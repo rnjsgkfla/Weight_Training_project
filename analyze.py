@@ -235,7 +235,13 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
     summary_md = "### 분석 결과\n" + " / ".join(summary) + \
                  "\n\n아래 항목을 클릭하면 모범 자세와 내 자세를 비교할 수 있어요."
     if not items:
-        summary_md = "⚠️ 영상을 하나 이상 올려주세요."
+        if not summary:
+            # 처리한 뷰가 하나도 없음 = 영상을 안 올림
+            summary_md = "⚠️ 영상을 하나 이상 올려주세요."
+        else:
+            # 영상은 처리했으나 반복(또는 사람)을 인식 못 함
+            summary_md = ("⚠️ 사람 또는 반복 동작을 인식하지 못했어요.\n\n"
+                          "전신이 화면에 다 나오게, 운동을 1회 이상 수행한 영상을 올려주세요.")
     return items, summary_md
 
 
