@@ -65,7 +65,7 @@ struct ContentView: View {
                 Spacer()
                 Image(systemName: data.wrappedValue == nil
                       ? "square.and.arrow.up" : "checkmark.circle.fill")
-                    .foregroundStyle(data.wrappedValue == nil ? .secondary : .green)
+                    .foregroundStyle(data.wrappedValue == nil ? Color.secondary : Color.green)
             }
         }
         .onChange(of: item.wrappedValue) { _, newValue in

@@ -1,12 +1,27 @@
 import SwiftUI
 
+/// 서버가 주는 마크다운 문자열을 SwiftUI 에서 보기 좋게 렌더한다.
+/// `### 헤더` 마커는 제거하고, `**볼드**` 등 인라인 서식은 살리며 줄바꿈을 유지한다.
+func styledMarkdown(_ markdown: String) -> Text {
+    let cleaned = markdown
+        .components(separatedBy: "\n")
+        .map { $0.hasPrefix("### ") ? String($0.dropFirst(4)) : $0 }
+        .joined(separator: "\n")
+    if let attr = try? AttributedString(
+        markdown: cleaned,
+        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+        return Text(attr)
+    }
+    return Text(cleaned)
+}
+
 struct ResultsView: View {
     let response: AnalyzeResponse
 
     var body: some View {
         List {
             Section {
-                Text(response.summary)
+                styledMarkdown(response.summary)
                     .font(.subheadline)
             }
             if !response.items.isEmpty {
@@ -36,7 +51,7 @@ struct ItemDetailView: View {
                     imageColumn("✅ 모범", uri: item.refImage)
                     imageColumn("🙋 내 자세", uri: item.userImage)
                 }
-                Text(item.detail)
+                styledMarkdown(item.detail)
                     .font(.body)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
