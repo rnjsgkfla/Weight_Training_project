@@ -16,11 +16,15 @@ targets:
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: PoseFeedback/Info.plist
       properties:
         CFBundleDisplayName: 운동 피드백
-        UILaunchScreen: {}
+        # 런치 화면: 브랜드 색 배경 + 중앙 로고
+        UILaunchScreen:
+          UIColorName: BrandColor
+          UIImageName: LaunchLogo
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         # iOS 는 기본적으로 http(비 HTTPS)를 막으므로 localhost/LAN 접속을 허용

@@ -208,6 +208,11 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
                     'ref_video': ref_skel, 'ref_frame': ref_rep['bottom_f'],
                     'user_video': user_skel, 'user_frame': rep['bottom_f'],
                     'ok': True,
+                    # 구조화 필드 (앱 화면용)
+                    'view': view_kr, 'rep': k, 'feature_name': None,
+                    'phase': peak_label, 'time_sec': None,
+                    'ref_val': None, 'user_val': None, 'dev': None, 'unit': None,
+                    'message': "기준과 큰 차이 없음",
                 })
                 continue
             for f in faults:
@@ -229,6 +234,13 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
                     'ref_video': ref_skel, 'ref_frame': f['ref_frame'],
                     'user_video': user_skel, 'user_frame': f['user_frame'],
                     'ok': False,
+                    # 구조화 필드 (앱 화면용)
+                    'view': view_kr, 'rep': k, 'feature_name': name,
+                    'phase': f['phase'], 'time_sec': round(t, 1),
+                    'ref_val': round(float(f['ref_val']), 1),
+                    'user_val': round(float(f['user_val']), 1),
+                    'dev': round(float(f['max_dev']), 1), 'unit': unit,
+                    'message': f['message'],
                 })
         summary.append(f"**{view_kr}**: {len(user_reps)}회 · 지적 {n_fault}건")
 

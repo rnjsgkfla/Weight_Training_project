@@ -25,3 +25,7 @@ data/raw/*
 clone-temp/
 
 *.mov
+
+# 개인 포트폴리오 정리 (git 미포함)
+PORTFOLIO.md
+PORTFOLIO_notion.md

@@ -36,10 +36,21 @@ MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 class FeedbackItem(BaseModel):
     key: str            # 항목 식별자 (프론트에서 선택용, 항상 고유)
     label: str          # 목록에 표시할 이름
-    detail: str         # 상세 설명 (markdown)
+    detail: str         # 상세 설명 (markdown, 하위호환용)
     ok: bool            # 결함 없이 양호한 항목이면 True
     ref_image: str | None   # 모범 자세 프레임 (data:image/jpeg;base64,...)
     user_image: str | None  # 내 자세 프레임 (data:image/jpeg;base64,...)
+    # 구조화 필드 (앱 비교 화면용, 양호 항목은 수치가 없어 null 일 수 있음)
+    view: str | None = None          # 측면 / 정면
+    rep: int | None = None           # 회차
+    feature_name: str | None = None  # 결함 이름 (예: 무릎 깊이)
+    phase: str | None = None         # 하강 / 최저 / 상승
+    time_sec: float | None = None    # 결함 시각(초)
+    ref_val: float | None = None     # 모범 값
+    user_val: float | None = None    # 내 값
+    dev: float | None = None         # 차이 (내 − 모범)
+    unit: str | None = None          # 단위 (° 등)
+    message: str | None = None       # 교정 문구
 
 
 class AnalyzeResponse(BaseModel):
@@ -96,6 +107,10 @@ def _analyze_and_encode(exercise, side_path, front_path, workdir):
             key=it["key"], label=it["label"], detail=it["detail"], ok=it["ok"],
             ref_image=_img_data_uri(it["ref_video"], it["ref_frame"]),
             user_image=_img_data_uri(it["user_video"], it["user_frame"]),
+            view=it.get("view"), rep=it.get("rep"), feature_name=it.get("feature_name"),
+            phase=it.get("phase"), time_sec=it.get("time_sec"),
+            ref_val=it.get("ref_val"), user_val=it.get("user_val"), dev=it.get("dev"),
+            unit=it.get("unit"), message=it.get("message"),
         )
         for it in items
     ]
