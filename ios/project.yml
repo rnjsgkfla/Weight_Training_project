@@ -26,3 +26,6 @@ targets:
         # iOS 는 기본적으로 http(비 HTTPS)를 막으므로 localhost/LAN 접속을 허용
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # 앱 내 촬영용 권한 설명 (없으면 카메라 접근 시 크래시)
+        NSCameraUsageDescription: 운동 영상을 촬영하기 위해 카메라를 사용합니다.
+        NSMicrophoneUsageDescription: 운동 영상 촬영 시 소리를 함께 녹화합니다.
