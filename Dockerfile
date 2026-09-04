@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir --timeout=180 --retries=6 -r requirements-api.txt
 COPY . .
 
 # 기준(모범) 데이터 생성: data/processed 는 .gitignore 라 이미지 빌드 시
-# 원본 영상에서 재생성해 이미지 안에 굽는다 (스쿼트·런지, 사레레는 원본 없어 건너뜀).
+# 원본 영상에서 재생성해 이미지 안에 굽는다.
 RUN python build_references.py
 
 # 런타임은 비루트 사용자로 (컨테이너 권한 오남용 위험 완화). /app 소유권도 넘긴다.

@@ -27,10 +27,21 @@ struct ContentView: View {
     @State private var errorMessage: String?
 
     private let exercises = [("squat", "스쿼트", "figure.strengthtraining.traditional"),
-                            ("lunge", "런지", "figure.strengthtraining.functional")]
+                            ("lunge", "런지", "figure.strengthtraining.functional"),
+                            ("lateral_raise", "사이드 레터럴 레이즈", "figure.arms.open")]
     private let api = APIClient()
 
-    private var canAnalyze: Bool { sideData != nil || frontData != nil }
+    /// 운동별로 필요한 영상 뷰 (api.py REFERENCE 와 1:1 — 사이드 레터럴 레이즈는 정면만 쓴다)
+    private let exerciseViews: [String: Set<String>] = [
+        "squat": ["side", "front"],
+        "lunge": ["side", "front"],
+        "lateral_raise": ["front"],
+    ]
+    private var currentViews: Set<String> { exerciseViews[exercise] ?? ["side", "front"] }
+
+    private var canAnalyze: Bool {
+        currentViews.contains("side") ? (sideData != nil || frontData != nil) : frontData != nil
+    }
 
     var body: some View {
         NavigationStack {
@@ -88,14 +99,26 @@ struct ContentView: View {
     private func exerciseCard(key: String, title: String, icon: String) -> some View {
         let selected = exercise == key
         return Button {
-            withAnimation(.easeInOut(duration: 0.15)) { exercise = key }
+            withAnimation(.easeInOut(duration: 0.15)) {
+                exercise = key
+                // 측면 뷰를 쓰지 않는 운동으로 바꾸면 이전에 골라둔 측면 영상은 비운다
+                if !(exerciseViews[key] ?? []).contains("side") {
+                    sideData = nil
+                    sideThumb = nil
+                    sideItem = nil
+                }
+            }
         } label: {
             VStack(spacing: 8) {
                 Image(systemName: icon).font(.title2)
-                Text(title).font(.subheadline).bold()
+                Text(title)
+                    .font(.subheadline).bold()
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity, minHeight: 76)
+            .padding(.vertical, 12)
             .background(selected ? Color.brand.opacity(0.14) : Color(.secondarySystemGroupedBackground))
             .foregroundStyle(selected ? Color.brand : Color.primary)
             .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -111,11 +134,15 @@ struct ContentView: View {
 
     private var videoSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("영상 (하나 이상)").font(.headline)
-            videoCard("측면 영상", data: $sideData, thumb: $sideThumb, item: $sideItem,
-                      showOptions: $showSideOptions, showPicker: $showSidePicker, showCamera: $showSideCamera)
-            videoCard("정면 영상", data: $frontData, thumb: $frontThumb, item: $frontItem,
-                      showOptions: $showFrontOptions, showPicker: $showFrontPicker, showCamera: $showFrontCamera)
+            Text(currentViews.count > 1 ? "영상 (하나 이상)" : "영상").font(.headline)
+            if currentViews.contains("side") {
+                videoCard("측면 영상", data: $sideData, thumb: $sideThumb, item: $sideItem,
+                          showOptions: $showSideOptions, showPicker: $showSidePicker, showCamera: $showSideCamera)
+            }
+            if currentViews.contains("front") {
+                videoCard("정면 영상", data: $frontData, thumb: $frontThumb, item: $frontItem,
+                          showOptions: $showFrontOptions, showPicker: $showFrontPicker, showCamera: $showFrontCamera)
+            }
             Text("촬영하거나 앨범에서 선택하세요. 전신이 화면에 다 나오게, 운동을 1회 이상 수행한 영상이어야 합니다.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
