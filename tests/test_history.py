@@ -16,7 +16,7 @@ def make_stats(knee_ratio, knee_fault):
                  'tol': 15.0, 'ratio': knee_ratio, 'fault': knee_fault},
                 {'feature': 'trunk', 'name': '상체 기울기', 'unit': '°', 'dev': 0.0,
                  'tol': 12.0, 'ratio': 0.0, 'fault': False},
-            ]}], 'warnings': []}
+            ]}], 'score_detail': None, 'warnings': []}
 
 
 @pytest.fixture
