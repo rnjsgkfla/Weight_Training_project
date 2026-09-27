@@ -13,7 +13,7 @@ db.py — DB 연결과 테이블 정의 (SQLAlchemy 2.x)
 import os
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, create_engine
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 DEFAULT_DATABASE_URL = "sqlite:///./data/app.db"
@@ -52,6 +52,8 @@ class WorkoutSession(Base):
     summary: Mapped[str] = mapped_column(Text)
     stats: Mapped[dict] = mapped_column(JSON)   # analyze_for_ui 의 stats 그대로
     items: Mapped[list] = mapped_column(JSON)   # 피드백 항목 (이미지·영상 경로 제외)
+    # 문제별 카드 {issues, good_points} (이미지 제외). 이 기능 이전 기록은 None
+    report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     user: Mapped[User] = relationship(back_populates="sessions")
 
@@ -68,8 +70,18 @@ def init_db(url=None):
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     engine = create_engine(url, pool_pre_ping=True, **kwargs)
     Base.metadata.create_all(engine)
+    _add_missing_columns(engine)
     SessionLocal.configure(bind=engine)
     return engine
+
+
+def _add_missing_columns(engine):
+    """create_all 은 기존 테이블에 새 컬럼을 추가하지 않으므로, 나중에 생긴 컬럼만 직접 추가한다.
+    (마이그레이션 도구 도입 전까지의 최소 처리 — nullable 컬럼 추가만 다룬다)"""
+    existing = {c['name'] for c in inspect(engine).get_columns('workout_sessions')}
+    with engine.begin() as conn:
+        if 'report' not in existing:
+            conn.execute(text("ALTER TABLE workout_sessions ADD COLUMN report JSON"))
 
 
 def get_db():

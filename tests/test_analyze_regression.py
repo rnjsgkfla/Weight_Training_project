@@ -19,7 +19,7 @@ def result(tmp_path_factory):
 
 
 def test_rep_count_and_score(result):
-    _items, _summary, stats = result
+    _items, _summary, stats, _report = result
     assert stats['rep_count'] == {'side': 4, 'front': 5}
     # 점수(scoring.py)는 측면 영상으로 계산: 얕은 스쿼트라 무릎 각도·골반 높이 오차가 허용 오차를 넘는다
     assert stats['score'] == 12
@@ -30,7 +30,7 @@ def test_rep_count_and_score(result):
 
 
 def test_faulted_features_per_rep(result):
-    _items, _summary, stats = result
+    _items, _summary, stats, _report = result
     faulted = [(r['view'], r['rep'], sorted(m['feature'] for m in r['metrics'] if m['fault']))
                for r in stats['reps']]
     assert faulted == [
@@ -47,7 +47,7 @@ def test_faulted_features_per_rep(result):
 
 
 def test_stats_consistent_with_items(result):
-    items, _summary, stats = result
+    items, _summary, stats, _report = result
     # 결함 항목 수 == 회차별 fault_count 합
     assert sum(not it['ok'] for it in items) == sum(r['fault_count'] for r in stats['reps'])
     # 모든 회차가 그 뷰의 판정 대상 특징을 빠짐없이 가진다
@@ -57,3 +57,18 @@ def test_stats_consistent_with_items(result):
         assert {m['feature'] for m in r['metrics']} == expected[r['view']]
         # 결함으로 지적된 특징은 반드시 허용오차를 넘은 적이 있다
         assert all(m['ratio'] > 1 for m in r['metrics'] if m['fault'])
+
+
+def test_issue_cards(result):
+    _items, _summary, stats, report = result
+    issues = report['issues']
+    # 측면·정면 모두 모든 회차에서 반복된 문제가 먼저, 그중 더 심한 순 → 측면 엉덩이 깊이(3.5배)가 1순위
+    assert [i['key'] for i in issues] == [
+        'side.hip_depth', 'side.knee', 'front.valgus', 'front.stance', 'front.sym_knee']
+    top = issues[0]
+    assert top['reps'] == [1, 2, 3, 4] and top['total_reps'] == 4
+    assert top['name'] == '엉덩이 깊이'
+    # 상위 3개만 비교 프레임, DTW 로 맞춘 국면 라벨이 붙는다
+    assert [len(i['clip']) for i in issues] == [12, 12, 12, 0, 0]
+    assert {c['phase'] for c in top['clip']} <= {'하강', '최저', '상승'}
+    assert report['good_points'] == ['상체 기울기', '무릎 전방이동', '골반 수평']

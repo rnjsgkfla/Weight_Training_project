@@ -1,22 +1,11 @@
 import SwiftUI
 
-// MARK: - 결과 목록 (뷰별 그룹)
+// MARK: - 결과 화면
 
+/// 분석 결과. 문제 카드(issues)가 있으면 문제별 카드로, 없으면(이전 기록) 회차별 목록으로 보여준다.
 struct ResultsView: View {
     let response: AnalyzeResponse
     var title = "분석 결과"
-
-    /// 측면/정면 등 뷰 순서를 유지하며 그룹화
-    private var groups: [(view: String, items: [FeedbackItem])] {
-        var order: [String] = []
-        var map: [String: [FeedbackItem]] = [:]
-        for it in response.items {
-            let v = it.view ?? "결과"
-            if map[v] == nil { order.append(v); map[v] = [] }
-            map[v]?.append(it)
-        }
-        return order.map { ($0, map[$0] ?? []) }
-    }
 
     var body: some View {
         Group {
@@ -27,50 +16,123 @@ struct ResultsView: View {
                     Text(response.summary
                         .replacingOccurrences(of: "⚠️ ", with: ""))
                 }
-            } else {
+            } else if let issues = response.issues {
                 List {
-                    // 측면·정면 중 한쪽만 분석하지 못한 경우 그 이유를 맨 위에 보여준다
-                    if let warnings = response.stats?.warnings, !warnings.isEmpty {
+                    ScoreSections(response: response)
+                    if issues.isEmpty {
                         Section {
-                            ForEach(warnings, id: \.self) { w in
-                                Label(w, systemImage: "exclamationmark.triangle.fill")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.orange)
+                            Label("모든 회차에서 큰 문제가 없어요", systemImage: "checkmark.seal.fill")
+                                .foregroundStyle(.green)
+                        }
+                    } else {
+                        Section("이것부터 고쳐보세요") {
+                            NavigationLink { IssueDetailView(issue: issues[0]) } label: {
+                                IssueCard(issue: issues[0], isTop: true)
                             }
                         }
-                    }
-                    if let score = response.stats?.score {
-                        Section {
-                            HStack {
-                                Text("자세 점수").font(.headline)
-                                Spacer()
-                                ScoreBadge(score: score)
-                            }
-                            if let detail = response.stats?.scoreDetail {
-                                ForEach(detail.items, id: \.item) { ScoreItemRow(item: $0) }
-                            }
-                        } footer: {
-                            Text("모범 동작과 같은 순간끼리 비교한 평균 오차를 항목별 허용 오차로 나눠 가중 합산했어요. 막대가 짧을수록 모범에 가까워요.")
-                        }
-                    }
-                    ForEach(groups, id: \.view) { group in
-                        Section {
-                            ForEach(group.items) { item in
-                                NavigationLink { ComparisonView(item: item) } label: {
-                                    ItemRow(item: item)
+                        if issues.count > 1 {
+                            Section("다른 고칠 점") {
+                                ForEach(issues.dropFirst()) { issue in
+                                    NavigationLink { IssueDetailView(issue: issue) } label: {
+                                        IssueCard(issue: issue, isTop: false)
+                                    }
                                 }
                             }
-                        } header: {
-                            let faults = group.items.filter { !$0.ok }.count
-                            let reps = Set(group.items.compactMap { $0.rep }).count
-                            Text("\(group.view) · \(reps)회 · 지적 \(faults)건")
                         }
                     }
+                    if let good = response.goodPoints, !good.isEmpty {
+                        Section("잘한 점") {
+                            Label(good.joined(separator: ", "), systemImage: "hand.thumbsup.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    Section {
+                        NavigationLink {
+                            List { RepGroupSections(items: response.items) }
+                                .navigationTitle("회차별 결과")
+                                .navigationBarTitleDisplayMode(.inline)
+                        } label: {
+                            Label("회차별 전체 결과 보기", systemImage: "list.bullet")
+                        }
+                    }
+                }
+            } else {
+                List {
+                    ScoreSections(response: response)
+                    RepGroupSections(items: response.items)
                 }
             }
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// 경고(분석하지 못한 뷰 등) + 자세 점수·계산 내역
+struct ScoreSections: View {
+    let response: AnalyzeResponse
+
+    var body: some View {
+        if let warnings = response.stats?.warnings, !warnings.isEmpty {
+            Section {
+                ForEach(warnings, id: \.self) { w in
+                    Label(w, systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        if let score = response.stats?.score {
+            Section {
+                HStack {
+                    Text("자세 점수").font(.headline)
+                    Spacer()
+                    ScoreBadge(score: score)
+                }
+                if let detail = response.stats?.scoreDetail {
+                    // 계산 내역은 접어 둬서 문제 카드가 먼저 보이게 한다
+                    DisclosureGroup("점수 계산 내역") {
+                        ForEach(detail.items, id: \.item) { ScoreItemRow(item: $0) }
+                        Text("모범 동작과 같은 순간끼리 비교한 평균 오차를 항목별 허용 오차로 나눠 가중 합산했어요. 막대가 짧을수록 모범에 가까워요.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .font(.subheadline)
+                }
+            }
+        }
+    }
+}
+
+/// 회차별 결함 목록 (측면/정면 순서 유지)
+struct RepGroupSections: View {
+    let items: [FeedbackItem]
+
+    private var groups: [(view: String, items: [FeedbackItem])] {
+        var order: [String] = []
+        var map: [String: [FeedbackItem]] = [:]
+        for it in items {
+            let v = it.view ?? "결과"
+            if map[v] == nil { order.append(v); map[v] = [] }
+            map[v]?.append(it)
+        }
+        return order.map { ($0, map[$0] ?? []) }
+    }
+
+    var body: some View {
+        ForEach(groups, id: \.view) { group in
+            Section {
+                ForEach(group.items) { item in
+                    NavigationLink { ComparisonView(item: item) } label: {
+                        ItemRow(item: item)
+                    }
+                }
+            } header: {
+                let faults = group.items.filter { !$0.ok }.count
+                let reps = Set(group.items.compactMap { $0.rep }).count
+                Text("\(group.view) · \(reps)회 · 지적 \(faults)건")
+            }
+        }
     }
 }
 

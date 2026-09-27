@@ -70,10 +70,41 @@ class SessionStats(BaseModel):
     warnings: list[str] = []    # 분석하지 못한 뷰의 안내 (사람 없음·전신 안 보임 등)
 
 
+class IssueFrame(BaseModel):
+    phase: str                  # 하강 / 최저 / 상승 (운동별 라벨)
+    ref_image: str | None       # 모범 (data URI, 문제 관절 초록 표시)
+    user_image: str | None      # 내 자세 (data URI, 문제 관절 빨강 표시)
+
+
+class Issue(BaseModel):
+    """문제별 카드: 같은 뷰·특징의 결함을 회차와 무관하게 묶은 것."""
+    key: str                    # 예: side.knee
+    view: str                   # side / front
+    view_kr: str
+    feature: str
+    name: str                   # 항목 이름 (예: 무릎 깊이)
+    unit: str                   # ° 또는 빈 문자열
+    headline: str               # 문제 설명 (예: 오른쪽 팔꿈치를 기준보다 많이 굽혔습니다)
+    advice: str | None          # 할 일 (예: 조금 더 펴보세요)
+    reps: list[int]             # 이 문제가 나온 회차
+    total_reps: int             # 그 뷰의 전체 회차 수
+    severity: float             # 가장 심했던 순간의 벗어난 정도 / 허용오차
+    rep: int                    # 가장 심했던 회차
+    phase: str
+    time_sec: float
+    ref_val: float
+    user_val: float
+    thumb_ref: str | None       # 가장 심했던 순간 (data URI)
+    thumb_user: str | None
+    clip: list[IssueFrame]      # DTW 로 맞춘 비교 프레임 (상위 문제만, 없으면 빈 목록)
+
+
 class AnalyzeResponse(BaseModel):
     exercise: str
     summary: str
     items: list[FeedbackItem]
+    issues: list[Issue] | None = None   # 문제별 카드 (심각한 순). 이 기능 이전 기록은 null
+    good_points: list[str] = []         # 모든 회차에서 지적되지 않은 항목
     stats: SessionStats         # 히스토리·발전 추이용 구조화 수치
     session_id: int | None = None   # 로그인 상태로 분석하면 저장된 기록 id
 

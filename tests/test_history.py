@@ -6,7 +6,7 @@ import pytest
 
 import api
 from conftest import signup
-from test_api import FAKE_ITEM, FAKE_STATS, VIDEO
+from test_api import FAKE_ITEM, FAKE_REPORT, FAKE_STATS, VIDEO
 
 
 def make_stats(knee_ratio, knee_fault):
@@ -23,9 +23,11 @@ def make_stats(knee_ratio, knee_fault):
 def analyze_as(client, monkeypatch):
     """analyze_as(headers, stats, exercise) → 가짜 결과로 /analyze 를 호출해 session_id 반환."""
     monkeypatch.setattr(api, '_jpeg', lambda video, frame: b'jpeg-' + video.encode())
+    monkeypatch.setattr(api.issue_cards, 'render_frames',
+                        lambda frames: [f'frame{n}'.encode() for n in range(len(frames))])
 
     def run(headers, stats=FAKE_STATS, exercise='squat'):
-        monkeypatch.setattr(api, 'analyze_for_ui', lambda *a, **k: ([FAKE_ITEM], '요약', stats))
+        monkeypatch.setattr(api, 'analyze_for_ui', lambda *a, **k: ([FAKE_ITEM], '요약', stats, FAKE_REPORT))
         res = client.post('/analyze', data={'exercise': exercise}, files=VIDEO, headers=headers)
         assert res.status_code == 200, res.text
         return res.json()['session_id']
@@ -73,6 +75,30 @@ def test_session_detail_restores_response(client, analyze_as):
     assert item['message'] == '더 앉으세요'
     assert item['ref_image'] == api.jpeg_data_uri(b'jpeg-r.mp4')
     assert item['user_image'] == api.jpeg_data_uri(b'jpeg-u.mp4')
+
+
+def test_session_detail_restores_issue_cards(client, analyze_as):
+    headers = signup(client)
+    sid = analyze_as(headers)
+    body = client.get(f'/sessions/{sid}', headers=headers).json()
+    issue = body['issues'][0]
+    assert body['good_points'] == ['상체 기울기']
+    assert issue['headline'] == FAKE_REPORT['issues'][0]['headline']
+    assert issue['thumb_user'] == api.jpeg_data_uri(b'frame1')
+    assert [c['phase'] for c in issue['clip']] == ['하강', '최저']
+    assert issue['clip'][1]['ref_image'] == api.jpeg_data_uri(b'frame4')
+
+
+def test_old_session_without_report_has_no_issues(client, analyze_as):
+    # 문제 카드 기능 이전에 저장된 기록(report 없음)은 issues 가 null → 앱이 예전 목록을 보여준다
+    import db
+    headers = signup(client)
+    sid = analyze_as(headers)
+    with db.SessionLocal() as s:
+        s.get(db.WorkoutSession, sid).report = None
+        s.commit()
+    body = client.get(f'/sessions/{sid}', headers=headers).json()
+    assert body['issues'] is None and body['good_points'] == []
 
 
 def test_other_users_session_is_hidden(client, analyze_as):

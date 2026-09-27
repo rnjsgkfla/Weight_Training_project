@@ -75,7 +75,7 @@ def test_upper_body_only_video_gets_no_score(tmp_path):
         out.write(frame)
     out.release()
 
-    items, summary, stats = analyze_for_ui('squat', video, None, workdir=str(tmp_path / 'work'))
+    items, summary, stats, _report = analyze_for_ui('squat', video, None, workdir=str(tmp_path / 'work'))
     assert items == []
     assert stats['score'] is None
     assert '몸이 화면에 다 나오지 않았어요' in summary
@@ -93,6 +93,6 @@ def test_no_person_video_message(tmp_path):
         out.write(img)
     out.release()
 
-    items, summary, stats = analyze_for_ui('squat', video, None, workdir=str(tmp_path / 'work'))
+    items, summary, stats, _report = analyze_for_ui('squat', video, None, workdir=str(tmp_path / 'work'))
     assert items == [] and stats['score'] is None
     assert '사람을 찾지 못했어요' in summary
