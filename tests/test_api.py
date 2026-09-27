@@ -1,8 +1,8 @@
-"""/analyze 응답 스키마 확인. 무거운 분석은 가짜로 바꿔 빠르게 돈다."""
+"""/analyze 응답 스키마와 기록 저장 여부 확인. 무거운 분석은 가짜로 바꿔 빠르게 돈다."""
 import pytest
-from fastapi.testclient import TestClient
 
 import api
+from conftest import signup
 
 FAKE_ITEM = {
     'key': 'item0', 'label': '⚠️ 측면 · 1회차 · 무릎 깊이', 'detail': '...', 'ok': False,
@@ -19,28 +19,48 @@ FAKE_STATS = {
          'ratio': -0.25, 'fault': False},
     ]}],
 }
+EMPTY_STATS = {'score': None, 'rep_count': {'side': 0}, 'reps': []}
+VIDEO = {'side_video': ('s.mp4', b'fake', 'video/mp4')}
 
 
-@pytest.fixture
-def client(monkeypatch):
+@pytest.fixture(autouse=True)
+def fake_analysis(monkeypatch):
     monkeypatch.setattr(api, 'analyze_for_ui', lambda *a, **k: ([FAKE_ITEM], '요약', FAKE_STATS))
-    monkeypatch.setattr(api, '_img_data_uri', lambda *a: None)
-    return TestClient(api.app)
+    monkeypatch.setattr(api, '_jpeg', lambda video, frame: b'jpeg-' + video.encode())
 
 
-def test_analyze_returns_stats(client):
-    res = client.post('/analyze', data={'exercise': 'squat'},
-                      files={'side_video': ('s.mp4', b'fake', 'video/mp4')})
+def post_analyze(client, headers=None):
+    return client.post('/analyze', data={'exercise': 'squat'}, files=VIDEO, headers=headers or {})
+
+
+def test_analyze_without_login_is_not_saved(client):
+    res = post_analyze(client)
     assert res.status_code == 200
     body = res.json()
     assert body['stats'] == FAKE_STATS
+    assert body['session_id'] is None
     assert body['items'][0]['feature_name'] == '무릎 깊이'
+    assert body['items'][0]['ref_image'].startswith('data:image/jpeg;base64,')
 
 
-def test_stats_score_can_be_null(client, monkeypatch):
-    empty = {'score': None, 'rep_count': {'side': 0}, 'reps': []}
-    monkeypatch.setattr(api, 'analyze_for_ui', lambda *a, **k: ([], '인식 실패', empty))
-    res = client.post('/analyze', data={'exercise': 'squat'},
-                      files={'side_video': ('s.mp4', b'fake', 'video/mp4')})
+def test_analyze_with_login_is_saved(client):
+    headers = signup(client)
+    res = post_analyze(client, headers)
     assert res.status_code == 200
-    assert res.json()['stats'] == empty
+    assert isinstance(res.json()['session_id'], int)
+    assert len(client.get('/sessions', headers=headers).json()) == 1
+
+
+def test_analyze_with_no_reps_is_not_saved(client, monkeypatch):
+    monkeypatch.setattr(api, 'analyze_for_ui', lambda *a, **k: ([], '인식 실패', EMPTY_STATS))
+    headers = signup(client)
+    res = post_analyze(client, headers)
+    assert res.status_code == 200
+    assert res.json()['stats'] == EMPTY_STATS
+    assert res.json()['session_id'] is None
+    assert client.get('/sessions', headers=headers).json() == []
+
+
+def test_analyze_with_invalid_token_is_rejected(client):
+    res = post_analyze(client, {'Authorization': 'Bearer not-a-token'})
+    assert res.status_code == 401

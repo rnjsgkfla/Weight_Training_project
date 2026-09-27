@@ -13,6 +13,11 @@ __pycache__/
 # 파이프라인 생성물 (스크립트로 재생성 가능)
 data/processed/
 
+# 로컬 DB·기록 이미지 (uvicorn 직접 실행 시), 비밀값
+data/app.db
+data/media/
+.env
+
 # 원본 영상: 런지 관련 파일만 포함
 data/raw/*
 !data/raw/lunge_front_raw.mp4

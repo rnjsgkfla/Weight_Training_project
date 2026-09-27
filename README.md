@@ -12,8 +12,16 @@ MediaPipe 로 관절을 뽑아 정규화·DTW 정렬 후 규칙 기반으로 결
 |---|---|---|
 | GET | `/health` | 헬스 체크 |
 | GET | `/exercises` | 지원 운동과 필요한 뷰 목록 |
-| POST | `/analyze` | multipart: `exercise`, `side_video`, `front_video` → 반복별 피드백 + 비교 이미지 + 통계(`stats`: 점수·반복 수·회차별 측정값) JSON |
+| POST | `/analyze` | multipart: `exercise`, `side_video`, `front_video` → 반복별 피드백 + 비교 이미지 + 통계(`stats`: 점수·반복 수·회차별 측정값) JSON. 로그인 토큰을 보내면 기록으로 저장하고 `session_id` 반환 |
+| POST | `/auth/signup` | JSON `{email, password(8자 이상)}` → `{access_token}` (가입 후 바로 로그인) |
+| POST | `/auth/login` | JSON `{email, password}` → `{access_token}` (유효기간 30일) |
+| GET / DELETE | `/me` 🔒 | 내 계정 조회 / 회원 탈퇴 (기록·이미지 모두 삭제) |
+| GET | `/sessions` 🔒 | 내 운동 기록 목록 (최신순). 쿼리: `exercise`, `since`, `until`(ISO 8601), `limit` |
+| GET / DELETE | `/sessions/{id}` 🔒 | 기록 상세(당시 분석 응답 그대로, 이미지 포함) / 삭제 |
+| GET | `/progress/{exercise}` 🔒 | 발전 추이: 기록별 점수 + 특징별 평균 ratio·지적 비율 (오래된 순) |
 | GET | `/docs` | 자동 생성 API 문서(Swagger) |
+
+🔒 = `Authorization: Bearer <access_token>` 헤더 필요.
 
 예시:
 ```bash
@@ -35,13 +43,17 @@ cd Weight_Training_project
 # 이미 클론했다면:  git pull origin main
 ```
 
-### 2) 백엔드 실행 (Docker · 권장)
+### 2) 백엔드 실행 (Docker Compose · 권장)
+API 와 Postgres(운동 기록 DB)를 함께 띄운다. 서버 배포도 같은 방식이다.
 ```bash
-docker build -t pose-api .          # 기준 데이터까지 이미지에 생성 (~2~3분)
-docker run -p 8000:8080 pose-api    # http://localhost:8000/docs 로 확인
+cp .env.example .env                # POSTGRES_PASSWORD, JWT_SECRET 값을 바꾼다
+docker compose up -d --build        # 기준 데이터까지 이미지에 생성 (~2~3분)
+                                    # http://localhost:8000/docs 로 확인
 ```
 > `data/processed`(기준 데이터)는 커밋되지 않지만, 빌드 시 `build_references.py` 가 원본 영상
 > (`data/raw`)에서 재생성해 이미지에 굽는다. 포트는 `호스트:컨테이너` = `8000:8080`.
+> DB 와 기록 이미지는 Docker 볼륨(`pgdata`, `media`)에 남아서 컨테이너를 다시 만들어도 유지된다
+> (`docker compose down -v` 는 볼륨까지 지우므로 주의).
 
 백엔드만 Python 으로 직접 띄우려면:
 ```bash
@@ -50,6 +62,8 @@ python3.11 -m venv venv
 python build_references.py            # 원본 영상 → 기준 데이터 생성
 ./venv/bin/uvicorn api:app --reload   # http://127.0.0.1:8000/docs
 ```
+> 이 경우 DB 는 `data/app.db`(SQLite), 기록 이미지는 `data/media/` 에 저장된다.
+> `JWT_SECRET` 을 설정하지 않으면 재시작할 때마다 로그인 토큰이 무효가 된다.
 
 ### 3) iOS 앱 실행 (macOS + Xcode)
 백엔드가 **먼저 켜져 있어야** 한다(시뮬레이터는 맥의 `localhost:8000` 에 바로 접속 — 네트워크 무관).
@@ -74,9 +88,9 @@ xcrun simctl launch "iPhone 17" com.posefeedback.app
 
 ### 끄기 / 다시 켜기
 ```bash
-docker ps               # 실행 중 컨테이너 확인
-docker stop <ID>        # 백엔드 중지
-docker run -p 8000:8080 pose-api   # 다시 실행 (이미지 남아있어 재빌드 불필요)
+docker compose stop     # 중지 (데이터 유지)
+docker compose start    # 다시 실행 (재빌드 불필요)
+docker compose logs -f api   # 서버 로그 보기
 ```
 
 ## 테스트
@@ -97,7 +111,13 @@ python build_references.py            # 기준 데이터가 없으면 먼저 생
 ## 구조
 
 ```
-api.py                 FastAPI 엔드포인트 (얇은 래퍼)
+api.py                 FastAPI 앱 + /analyze (분석 파이프라인 래퍼, 로그인 시 기록 저장)
+auth.py                회원가입·로그인 (bcrypt + JWT)
+history.py             운동 기록 목록·상세·삭제·발전 추이
+db.py                  DB 연결·테이블 (SQLAlchemy, SQLite/Postgres)
+media.py               기록 비교 이미지 파일 저장
+schemas.py             API 요청/응답 스키마
+docker-compose.yml     API + Postgres
 analyze.py             파이프라인 오케스트레이션 + UI용 구조화
 build_references.py    원본 영상 → 운동별 기준 데이터 일괄 생성
 keypoint_extractor.py  MediaPipe 관절 추출

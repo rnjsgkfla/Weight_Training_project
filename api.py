@@ -3,7 +3,8 @@ api.py — FastAPI 백엔드: 영상 업로드 → 자세 피드백 JSON
 
 기존 분석 파이프라인(analyze.py)을 그대로 감싼다. 프론트(앱/웹)가 운동 종류와
 측면·정면 영상을 올리면, 반복별 피드백 항목과 '모범 vs 내 자세' 비교 이미지를
-JSON 으로 돌려준다.
+JSON 으로 돌려준다. 로그인 토큰과 함께 호출하면 결과를 운동 기록으로 저장한다
+(회원가입·로그인은 auth.py, 기록 조회는 history.py).
 
 동시 사용자 대응:
   요청마다 tempfile.mkdtemp() 로 임시 작업폴더를 격리하고, 처리 후 삭제한다
@@ -13,18 +14,32 @@ JSON 으로 돌려준다.
 """
 
 import os
-import base64
 import tempfile
 import shutil
+from contextlib import asynccontextmanager
 
 import cv2
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
+import auth
+import history
 from analyze import analyze_for_ui, frame_at, REFERENCE, EXERCISE_KR
+from db import init_db, get_db
+from media import jpeg_data_uri
+from schemas import AnalyzeResponse, FeedbackItem
 
-app = FastAPI(title="운동 자세 피드백 API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app):
+    init_db()  # DATABASE_URL (기본: data/app.db SQLite)
+    yield
+
+
+app = FastAPI(title="운동 자세 피드백 API", version="0.2.0", lifespan=lifespan)
+app.include_router(auth.router)
+app.include_router(history.router)
 
 # 업로드 최대 크기 (스쿼트 몇 회 영상이면 보통 수십 MB 이내). 초과 시 413 으로 거부해
 # 거대 파일이 디스크를 채우는 것을 막는다.
@@ -32,60 +47,9 @@ MAX_UPLOAD_MB = 100
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
 
-# ── 응답 스키마 ────────────────────────────────────────────────────────────────
-class FeedbackItem(BaseModel):
-    key: str            # 항목 식별자 (프론트에서 선택용, 항상 고유)
-    label: str          # 목록에 표시할 이름
-    detail: str         # 상세 설명 (markdown, 하위호환용)
-    ok: bool            # 결함 없이 양호한 항목이면 True
-    ref_image: str | None   # 모범 자세 프레임 (data:image/jpeg;base64,...)
-    user_image: str | None  # 내 자세 프레임 (data:image/jpeg;base64,...)
-    # 구조화 필드 (앱 비교 화면용, 양호 항목은 수치가 없어 null 일 수 있음)
-    view: str | None = None          # 측면 / 정면
-    rep: int | None = None           # 회차
-    feature_name: str | None = None  # 결함 이름 (예: 무릎 깊이)
-    phase: str | None = None         # 하강 / 최저 / 상승
-    time_sec: float | None = None    # 결함 시각(초)
-    ref_val: float | None = None     # 모범 값
-    user_val: float | None = None    # 내 값
-    dev: float | None = None         # 차이 (내 − 모범)
-    unit: str | None = None          # 단위 (° 등)
-    message: str | None = None       # 교정 문구
-
-
-class RepMetric(BaseModel):
-    feature: str        # 특징 식별자 (예: knee)
-    name: str           # 한글 이름 (예: 무릎 깊이)
-    unit: str           # 단위 (° 또는 빈 문자열)
-    dev: float          # 가장 나빴던 순간의 편차 (내 − 모범, asym 은 절대값)
-    tol: float          # 허용오차
-    ratio: float        # 벗어난 정도 / 허용오차 (1 초과면 허용오차 밖, 0 이하면 기준보다 나쁜 적 없음)
-    fault: bool         # 이 회차에서 결함으로 지적됐는지 (순간적 이탈은 ratio > 1 이어도 False)
-
-
-class RepStats(BaseModel):
-    view: str           # side / front
-    rep: int            # 회차
-    fault_count: int
-    metrics: list[RepMetric]
-
-
-class SessionStats(BaseModel):
-    score: int | None           # 0~100, 판정한 반복이 없으면 null
-    rep_count: dict[str, int]   # {view: 반복 수}
-    reps: list[RepStats]
-
-
-class AnalyzeResponse(BaseModel):
-    exercise: str
-    summary: str
-    items: list[FeedbackItem]
-    stats: SessionStats         # 히스토리·발전 추이용 구조화 수치
-
-
 # ── 헬퍼 ───────────────────────────────────────────────────────────────────────
-def _img_data_uri(video_path, frame_number):
-    """영상의 특정 프레임을 JPEG data URI 문자열로 인코딩한다(없으면 None).
+def _jpeg(video_path, frame_number):
+    """영상의 특정 프레임을 JPEG 바이트로 인코딩한다(없으면 None).
 
     비교용 사진이라 JPEG(품질 80)로 인코딩해 응답 크기를 줄인다(PNG 대비 5~8배 작음).
     """
@@ -96,7 +60,7 @@ def _img_data_uri(video_path, frame_number):
     ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 80])
     if not ok:
         return None
-    return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
+    return buf.tobytes()
 
 
 async def _save_upload(upload, workdir, view):
@@ -126,19 +90,10 @@ def _analyze_and_encode(exercise, side_path, front_path, workdir):
     스레드풀로 오프로드해 이벤트 루프가 막히지 않게 한다.
     """
     items, summary, stats = analyze_for_ui(exercise, side_path, front_path, workdir=workdir)
-    out_items = [
-        FeedbackItem(
-            key=it["key"], label=it["label"], detail=it["detail"], ok=it["ok"],
-            ref_image=_img_data_uri(it["ref_video"], it["ref_frame"]),
-            user_image=_img_data_uri(it["user_video"], it["user_frame"]),
-            view=it.get("view"), rep=it.get("rep"), feature_name=it.get("feature_name"),
-            phase=it.get("phase"), time_sec=it.get("time_sec"),
-            ref_val=it.get("ref_val"), user_val=it.get("user_val"), dev=it.get("dev"),
-            unit=it.get("unit"), message=it.get("message"),
-        )
-        for it in items
-    ]
-    return summary, out_items, stats
+    # (모범, 내 자세) JPEG — 응답에 data URI 로 넣고, 로그인 상태면 기록 이미지로도 저장한다
+    images = [(_jpeg(it["ref_video"], it["ref_frame"]), _jpeg(it["user_video"], it["user_frame"]))
+              for it in items]
+    return items, summary, stats, images
 
 
 # ── 엔드포인트 ─────────────────────────────────────────────────────────────────
@@ -159,11 +114,15 @@ async def analyze(
     exercise: str = Form("squat"),
     side_video: UploadFile | None = File(None),
     front_video: UploadFile | None = File(None),
+    user=Depends(auth.get_optional_user),
+    db: Session = Depends(get_db),
 ):
     """운동 종류와 측면·정면 영상을 받아 반복별 자세 피드백을 반환한다.
 
     - exercise 가 지원하지 않는 뷰의 영상은 무시된다(예: 사이드레터럴레이즈의 측면).
     - 둘 중 하나만 올려도 된다.
+    - 로그인 토큰(Authorization: Bearer)과 함께 호출하면 결과를 기록으로 저장하고
+      session_id 를 돌려준다. 반복을 하나도 인식하지 못한 결과는 저장하지 않는다.
     """
     if exercise not in REFERENCE:
         raise HTTPException(status_code=400,
@@ -184,7 +143,7 @@ async def analyze(
 
         try:
             # 무거운 동기 작업은 스레드풀로 오프로드 (이벤트 루프 블로킹 방지)
-            summary, out_items, stats = await run_in_threadpool(
+            items, summary, stats, images = await run_in_threadpool(
                 _analyze_and_encode, exercise, paths.get("side"), paths.get("front"), workdir)
         except ValueError as e:
             # 읽을 수 없는/빈 영상 등 잘못된 입력 → 사용자 잘못이므로 400
@@ -195,6 +154,17 @@ async def analyze(
                 status_code=503,
                 detail=f"'{EXERCISE_KR.get(exercise, exercise)}' 기준 데이터가 아직 준비되지 않았습니다.")
 
-        return AnalyzeResponse(exercise=exercise, summary=summary, items=out_items, stats=stats)
+        session_id = None
+        if user is not None and stats["score"] is not None:
+            session_id = await run_in_threadpool(
+                history.save_session, db, user.id, exercise, summary, items, stats, images)
+
+        out_items = [
+            FeedbackItem(**{k: it.get(k) for k in history.ITEM_FIELDS},
+                         ref_image=jpeg_data_uri(ref), user_image=jpeg_data_uri(usr))
+            for it, (ref, usr) in zip(items, images)
+        ]
+        return AnalyzeResponse(exercise=exercise, summary=summary, items=out_items,
+                               stats=stats, session_id=session_id)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
