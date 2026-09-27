@@ -40,12 +40,65 @@ struct AnalyzeResponse: Codable {
     let exercise: String
     let summary: String
     let items: [FeedbackItem]
+    /// 문제별 카드 (심각한 순). 이 기능 이전 기록은 nil → 예전 회차별 목록을 보여준다
+    let issues: [Issue]?
+    let goodPoints: [String]?
     let stats: SessionStats?
     let sessionId: Int?
 
     enum CodingKeys: String, CodingKey {
-        case exercise, summary, items, stats
+        case exercise, summary, items, issues, stats
+        case goodPoints = "good_points"
         case sessionId = "session_id"
+    }
+}
+
+/// 문제별 카드: 같은 뷰·항목의 결함을 회차와 무관하게 묶은 것 (schemas.py Issue)
+struct Issue: Codable, Identifiable {
+    let key: String
+    let view: String
+    let viewKr: String
+    let feature: String
+    let name: String
+    let unit: String
+    let headline: String
+    let advice: String?
+    let reps: [Int]
+    let totalReps: Int
+    let severity: Double
+    let rep: Int
+    let phase: String
+    let timeSec: Double
+    let refVal: Double
+    let userVal: Double
+    let thumbRef: String?
+    let thumbUser: String?
+    /// DTW 로 같은 순간끼리 맞춘 비교 프레임 (상위 문제만, 없으면 빈 배열)
+    let clip: [IssueFrame]
+
+    var id: String { key }
+
+    enum CodingKeys: String, CodingKey {
+        case key, view, feature, name, unit, headline, advice, reps, severity, rep, phase, clip
+        case viewKr = "view_kr"
+        case totalReps = "total_reps"
+        case timeSec = "time_sec"
+        case refVal = "ref_val"
+        case userVal = "user_val"
+        case thumbRef = "thumb_ref"
+        case thumbUser = "thumb_user"
+    }
+}
+
+struct IssueFrame: Codable {
+    let phase: String
+    let refImage: String?
+    let userImage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case phase
+        case refImage = "ref_image"
+        case userImage = "user_image"
     }
 }
 

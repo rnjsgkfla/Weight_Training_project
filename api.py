@@ -27,6 +27,7 @@ import auth
 import history
 from analyze import analyze_for_ui, frame_at, REFERENCE, EXERCISE_KR
 from db import init_db, get_db
+import issues as issue_cards
 from media import jpeg_data_uri
 from schemas import AnalyzeResponse, FeedbackItem
 
@@ -89,11 +90,15 @@ def _analyze_and_encode(exercise, side_path, front_path, workdir):
     OpenCV/MediaPipe 는 CPU·IO 를 오래 잡는 동기 코드라, 엔드포인트에서 이 함수를
     스레드풀로 오프로드해 이벤트 루프가 막히지 않게 한다.
     """
-    items, summary, stats = analyze_for_ui(exercise, side_path, front_path, workdir=workdir)
+    items, summary, stats, report = analyze_for_ui(exercise, side_path, front_path, workdir=workdir)
     # (모범, 내 자세) JPEG — 응답에 data URI 로 넣고, 로그인 상태면 기록 이미지로도 저장한다
     images = [(_jpeg(it["ref_video"], it["ref_frame"]), _jpeg(it["user_video"], it["user_frame"]))
               for it in items]
-    return items, summary, stats, images
+    # 문제 카드 썸네일·비교 프레임 {이미지 이름: JPEG} (작업 폴더가 지워지기 전에 그린다)
+    frames, names = issue_cards.collect_frames(report["issues"])
+    report_images = dict(zip(names, issue_cards.render_frames(frames)))
+    report = {"issues": issue_cards.issue_meta(report["issues"]), "good_points": report["good_points"]}
+    return items, summary, stats, images, report, report_images
 
 
 # ── 엔드포인트 ─────────────────────────────────────────────────────────────────
@@ -144,7 +149,7 @@ async def analyze(
 
         try:
             # 무거운 동기 작업은 스레드풀로 오프로드 (이벤트 루프 블로킹 방지)
-            items, summary, stats, images = await run_in_threadpool(
+            items, summary, stats, images, report, report_images = await run_in_threadpool(
                 _analyze_and_encode, exercise, paths.get("side"), paths.get("front"), workdir)
         except ValueError as e:
             # 읽을 수 없는/빈 영상 등 잘못된 입력 → 사용자 잘못이므로 400
@@ -158,14 +163,18 @@ async def analyze(
         session_id = None
         if user is not None and stats["reps"]:  # 반복을 하나라도 분석했으면 저장 (점수가 없어도)
             session_id = await run_in_threadpool(
-                history.save_session, db, user.id, exercise, summary, items, stats, images)
+                history.save_session, db, user.id, exercise, summary, items, stats, images,
+                report, report_images)
 
         out_items = [
             FeedbackItem(**{k: it.get(k) for k in history.ITEM_FIELDS},
                          ref_image=jpeg_data_uri(ref), user_image=jpeg_data_uri(usr))
             for it, (ref, usr) in zip(items, images)
         ]
+        out_issues = issue_cards.with_images(
+            report["issues"], lambda name: jpeg_data_uri(report_images.get(name)))
         return AnalyzeResponse(exercise=exercise, summary=summary, items=out_items,
+                               issues=out_issues, good_points=report["good_points"],
                                stats=stats, session_id=session_id)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

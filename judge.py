@@ -77,7 +77,7 @@ def _height_diff_msg(part):
         # user_val = 왼쪽y − 오른쪽y. 정규화 좌표는 아래로 갈수록 커지므로
         # 양수면 왼쪽이 더 아래(덜 든 것) → 왼쪽을 더 올려야 함.
         side = '왼쪽' if user_val > 0 else '오른쪽'
-        return f'{side} {part}이 반대쪽보다 낮습니다 — {side}을 조금 더 들어올려 보세요'
+        return f'{side} {part} 반대쪽보다 낮습니다 — {side}을 조금 더 들어올려 보세요'
     return msg
 
 
@@ -118,7 +118,7 @@ LATERAL_RAISE_FAULT_RULES = {
     # 어깨 높이차는 좌우 비교(절대 기준, 위 'asym' 설명 참고) — 기준 영상 자체가
     # 자연스럽게 흔들리는 최대폭(0.044)보다 여유를 두고 잡았다. 손목과 달리 어깨는
     # '기준 높이'라는 목표 개념이 없어(그냥 몸에 붙어있는 지점) 좌우 비교가 더 맞다.
-    'shoulder_height_diff': ('asym',      0.06, _height_diff_msg('어깨')),
+    'shoulder_height_diff': ('asym',      0.06, _height_diff_msg('어깨가')),
 }
 
 LUNGE_FAULT_RULES = {

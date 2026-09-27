@@ -12,7 +12,7 @@ MediaPipe 로 관절을 뽑아 정규화·DTW 정렬 후 규칙 기반으로 결
 |---|---|---|
 | GET | `/health` | 헬스 체크 |
 | GET | `/exercises` | 지원 운동과 필요한 뷰 목록 |
-| POST | `/analyze` | multipart: `exercise`, `side_video`, `front_video` → 반복별 피드백 + 비교 이미지 + 통계(`stats`: 점수·반복 수·회차별 측정값) JSON. 로그인 토큰을 보내면 기록으로 저장하고 `session_id` 반환. 사람이 없거나 전신이 안 보이는 영상은 분석하지 않고 `stats.warnings` 로 이유를 알려준다 |
+| POST | `/analyze` | multipart: `exercise`, `side_video`, `front_video` → 반복별 피드백 + 비교 이미지 + 통계(`stats`: 점수·반복 수·회차별 측정값) JSON. 로그인 토큰을 보내면 기록으로 저장하고 `session_id` 반환. 사람이 없거나 전신이 안 보이는 영상은 분석하지 않고 `stats.warnings` 로 이유를 알려준다. `issues` = 문제별 카드(같은 문제를 회차와 무관하게 묶어 심각한 순, 상위 3개는 DTW 로 맞춘 모범/내 자세 비교 프레임 포함), `good_points` = 잘한 항목 |
 | POST | `/auth/signup` | JSON `{email, password(8자 이상)}` → `{access_token}` (가입 후 바로 로그인) |
 | POST | `/auth/login` | JSON `{email, password}` → `{access_token}` (유효기간 30일) |
 | GET / DELETE | `/me` 🔒 | 내 계정 조회 / 회원 탈퇴 (기록·이미지 모두 삭제) |
@@ -130,6 +130,8 @@ history.py             운동 기록 목록·상세·삭제·발전 추이
 db.py                  DB 연결·테이블 (SQLAlchemy, SQLite/Postgres)
 media.py               기록 비교 이미지 파일 저장
 schemas.py             API 요청/응답 스키마
+issues.py              문제별 카드 묶기·정렬 + 비교 프레임(문제 관절 표시) 생성
+scoring.py             자세 점수 (DTW 평균 오차 → 정규화 → 가중합)
 docker-compose.yml     API + Postgres
 analyze.py             파이프라인 오케스트레이션 + UI용 구조화
 build_references.py    원본 영상 → 운동별 기준 데이터 일괄 생성

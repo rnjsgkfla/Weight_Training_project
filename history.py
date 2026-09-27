@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 import media
 from analyze import REFERENCE
+from issues import with_images
 from auth import get_current_user
 from db import User, WorkoutSession, as_utc, get_db
 from schemas import (FeatureProgress, FeedbackItem, ProgressPoint, ProgressResponse,
@@ -31,21 +32,26 @@ ITEM_FIELDS = [f for f in FeedbackItem.model_fields if f not in ("ref_image", "u
 
 
 # ── 저장 ───────────────────────────────────────────────────────────────────────
-def save_session(db, user_id, exercise, summary, items, stats, images):
+def save_session(db, user_id, exercise, summary, items, stats, images,
+                 report=None, report_images=None):
     """분석 결과를 기록으로 저장하고 id 를 반환한다.
 
-    items  : analyze_for_ui 의 항목 dict 리스트
-    images : items 와 같은 순서의 (모범 JPEG, 내 JPEG) 바이트 쌍 (없으면 None)
+    items         : analyze_for_ui 의 항목 dict 리스트
+    images        : items 와 같은 순서의 (모범 JPEG, 내 JPEG) 바이트 쌍 (없으면 None)
+    report        : 문제 카드 {issues(이미지 제외), good_points}
+    report_images : 문제 카드 이미지 {이름: JPEG}
     """
     session = WorkoutSession(
         user_id=user_id, exercise=exercise, score=stats["score"], summary=summary,
-        stats=stats, items=[{k: it.get(k) for k in ITEM_FIELDS} for it in items])
+        stats=stats, items=[{k: it.get(k) for k in ITEM_FIELDS} for it in items], report=report)
     db.add(session)
     db.flush()  # 이미지 폴더 이름으로 쓸 id 확보
     try:
         for it, (ref_jpeg, user_jpeg) in zip(items, images):
             media.save_image(session.id, f"{it['key']}_ref", ref_jpeg)
             media.save_image(session.id, f"{it['key']}_user", user_jpeg)
+        for name, jpeg in (report_images or {}).items():
+            media.save_image(session.id, name, jpeg)
         db.commit()
     except Exception:
         db.rollback()
@@ -105,8 +111,12 @@ def get_session(session_id: int,
                      user_image=media.load_image_uri(s.id, f"{it['key']}_user"))
         for it in s.items
     ]
+    report = s.report or {}
+    issues = (with_images(report["issues"], lambda name: media.load_image_uri(s.id, name))
+              if "issues" in report else None)  # 이 기능 이전 기록은 None → 앱이 예전 목록 화면을 보여준다
     return SessionDetail(session_id=s.id, created_at=as_utc(s.created_at), exercise=s.exercise,
-                         summary=s.summary, items=items, stats=s.stats)
+                         summary=s.summary, items=items, issues=issues,
+                         good_points=report.get("good_points", []), stats=s.stats)
 
 
 @router.delete("/sessions/{session_id}", status_code=204)

@@ -28,6 +28,7 @@ from features import extract_and_save
 from rep_features import slice_reps
 from judge import judge_rep, format_feedback, PHASE_LABELS
 from scoring import SCORE_FUNCTIONS, SCORE_VIEW
+from issues import build_issues, good_points
 
 # 기준(템플릿) 영상의 특징/스무딩 CSV — 운동·뷰별 1 rep
 REFERENCE = {
@@ -234,8 +235,13 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
                   ratio = 벗어난 정도 / 허용오차 (1 초과면 허용오차 밖, 0 이하면 기준보다
                   나쁜 쪽으로 간 적 없음). ratio > 1 이어도 순간적이면(min_len 미만) fault 는 False
 
+    report (앱 결과 화면용):
+      issues      : 문제별 카드 (issues.build_issues). 같은 뷰·특징의 결함을 회차와 무관하게 묶고
+                    반복 횟수·심각도 순으로 정렬. 썸네일·비교 프레임은 '영상·프레임' 정보로만 담는다
+      good_points : 모든 회차에서 지적되지 않은 항목 이름
+
     Returns:
-      (items, summary_md, stats)
+      (items, summary_md, stats, report)
     """
     items = []
     summary = []
@@ -243,6 +249,8 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
     stats_reps = []
     rep_count = {}
     score_aligned = []  # 점수용 (모범 반복, 사용자 반복, DTW 경로) 목록
+    fault_log = []      # 문제 카드용 결함 기록
+    view_ctx = {}       # 뷰별 영상·랜드마크 경로 (비교 프레임용)
     videos = {'side': side_video, 'front': front_video}
     for view in REFERENCE[exercise]:
         video = videos.get(view)
@@ -272,6 +280,8 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
             faults, meta = judge_rep(ref_rep, rep, exercise=exercise)
             if view == SCORE_VIEW[exercise]:
                 score_aligned.append((ref_rep, rep, meta['path']))
+            fault_log += [{'view': view, 'rep': k, 'fault': f, 'ref_rep': ref_rep,
+                           'user_rep': rep, 'path': meta['path']} for f in faults]
             fault_feats = {f['feature'] for f in faults}
             stats_reps.append({
                 'view': view, 'rep': k, 'fault_count': len(faults),
@@ -328,6 +338,10 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
                 })
         summary.append(f"**{view_kr}**: {len(user_reps)}회 · 지적 {n_fault}건")
         rep_count[view] = len(user_reps)
+        view_ctx[view] = {'total_reps': len(user_reps), 'fps': fps,
+                          'ref_video': ref_skel, 'user_video': user_skel,
+                          'ref_landmarks': REFERENCE[exercise][view][1],
+                          'user_landmarks': os.path.join(workdir, f"{exercise}_{view}_smoothed.csv")}
 
     # 점수: 점수용 방향 영상의 모든 회차 DTW 대응쌍으로 계산 (scoring.py)
     score_detail = SCORE_FUNCTIONS[exercise](score_aligned) if score_aligned else None
@@ -353,7 +367,9 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
             # 영상은 처리했으나 반복(또는 사람)을 인식 못 함
             summary_md = ("⚠️ 사람 또는 반복 동작을 인식하지 못했어요.\n\n"
                           "전신이 화면에 다 나오게, 운동을 1회 이상 수행한 영상을 올려주세요.")
-    return items, summary_md, stats
+    report = {'issues': build_issues(exercise, fault_log, view_ctx, FEATURE_KR, FEATURE_UNIT),
+              'good_points': good_points(stats_reps, FEATURE_KR)}
+    return items, summary_md, stats, report
 
 
 def analyze(exercise='squat', side_video=None, front_video=None, workdir="data/processed/_user"):
