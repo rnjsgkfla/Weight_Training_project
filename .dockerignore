@@ -14,6 +14,10 @@ clone-temp/
 
 # 파이프라인 생성물 (이미지 빌드 시 build_references.py 로 재생성)
 data/processed/
+data/app.db
+data/media/
+.env
+tests/
 
 # 원본 영상: 기준(모범) 데이터 생성에 쓰는 사레레 영상만 포함, 나머지 테스트용 .mov 는 제외
 *.mov

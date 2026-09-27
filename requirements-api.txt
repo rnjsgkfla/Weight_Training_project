@@ -6,3 +6,9 @@ scipy==1.17.1
 fastapi==0.139.2
 uvicorn==0.51.0
 python-multipart==0.0.32
+# DB · 인증 (히스토리 기능)
+SQLAlchemy==2.1.1
+psycopg[binary]==3.3.6
+bcrypt==5.0.0
+PyJWT==2.15.0
+email-validator==2.3.0

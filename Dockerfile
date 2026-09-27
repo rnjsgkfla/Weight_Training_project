@@ -21,7 +21,8 @@ COPY . .
 RUN python build_references.py
 
 # 런타임은 비루트 사용자로 (컨테이너 권한 오남용 위험 완화). /app 소유권도 넘긴다.
-RUN useradd --create-home appuser && chown -R appuser:appuser /app
+# /app/media 는 기록 이미지 볼륨 마운트 지점 (미리 만들어 두면 볼륨이 appuser 소유로 생성됨)
+RUN useradd --create-home appuser && mkdir -p /app/media && chown -R appuser:appuser /app
 USER appuser
 
 # Cloud Run 은 PORT 환경변수를 주입한다 (기본 8080). 0.0.0.0 바인딩 필수.
