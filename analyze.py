@@ -17,7 +17,9 @@ analyze.py — 파이프라인 최종 통합: 사용자 영상 → 자세 피드
 """
 
 import os
+import csv
 import cv2
+import numpy as np
 
 from keypoint_extractor import extract_keypoints
 from smooth_landmarks import smooth_csv
@@ -100,6 +102,42 @@ def load_reference_rep(exercise, view):
     return reps[0]
 
 
+# ── 입력 검증 (사람이 아니거나 전신이 안 보이는 영상 거르기) ─────────────────
+# 실측(샘플 8개): 정상 영상은 인식률 1.00·필수관절 신뢰도 0.93 이상.
+#   상반신만 찍힌 영상은 신뢰도 0.07 인데도 MediaPipe 가 다리를 지어내 반복 6회·75점이 나왔다.
+MIN_DETECT_RATE = 0.5    # 관절이 인식된 프레임 비율
+MIN_VISIBILITY = 0.5     # 필수 관절(좌/우 중 잘 보이는 쪽)의 신뢰도 중앙값
+# 반복의 움직임 폭 / 기준 반복의 움직임 폭. 실측 최소: 얕게 앉은 실제 스쿼트(정면) 0.23.
+# 얕게 한 반복도 피드백 대상이라 떨림 수준만 걸러내도록 낮게 둔다.
+MIN_ROM_RATIO = 0.15
+
+# 운동별 필수 관절 (MediaPipe 번호, 좌/우 쌍). 측면에선 반대쪽 팔다리가 가려지므로 쌍 중 하나만 보이면 된다.
+REQUIRED_JOINTS = {
+    'squat':         [(11, 12), (23, 24), (25, 26), (27, 28)],  # 어깨·엉덩이·무릎·발목
+    'lunge':         [(11, 12), (23, 24), (25, 26), (27, 28)],
+    'lateral_raise': [(11, 12), (13, 14), (15, 16), (23, 24)],  # 어깨·팔꿈치·손목·엉덩이
+}
+FRAMING_HINT = {'lateral_raise': '상체와 양팔이'}
+
+
+class PoseInputError(ValueError):
+    """분석할 수 없는 입력(사람 없음·전신 안 보임). 메시지는 사용자 안내 문구."""
+
+
+def check_pose_input(landmarks_csv, exercise):
+    """관절 추출 결과가 분석할 만한지 확인한다. 문제가 있으면 PoseInputError."""
+    with open(landmarks_csv, newline='') as f:
+        rows = list(csv.reader(f))[1:]
+    detected = [r for r in rows if r[1] != '']
+    if not rows or len(detected) / len(rows) < MIN_DETECT_RATE:
+        raise PoseInputError("사람을 찾지 못했어요. 운동하는 모습이 화면에 잘 보이게 찍어주세요.")
+    # 행 구성: frame_number, (x, y, z, visibility) × 33
+    vis = np.median([[float(r[1 + 4 * j + 3]) for j in range(33)] for r in detected], axis=0)
+    if min(max(vis[a], vis[b]) for a, b in REQUIRED_JOINTS[exercise]) < MIN_VISIBILITY:
+        part = FRAMING_HINT.get(exercise, '머리부터 발끝까지')
+        raise PoseInputError(f"몸이 화면에 다 나오지 않았어요. {part} 모두 보이게 찍어주세요.")
+
+
 def process_user_video(video_path, exercise, view, workdir):
     """사용자 영상 하나(한 운동·뷰)를 파이프라인에 태워 반복별 특징까지 만든다."""
     os.makedirs(workdir, exist_ok=True)
@@ -111,6 +149,7 @@ def process_user_video(video_path, exercise, view, workdir):
     sk = base + "_skeleton.mp4"
 
     extract_keypoints(video_path, lm, sk)
+    check_pose_input(lm, exercise)
     smooth_csv(lm, sm)
     normalize_csv(sm, nm, video_path, flip_side=(view == 'side'))
     extract_and_save(exercise, view, nm, ft)
@@ -184,6 +223,7 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
     stats (히스토리·발전 추이 저장용):
       score     : 0~100. (회차×특징) 판정 중 결함이 없었던 비율. 판정한 반복이 없으면 None
       rep_count : {view: 반복 수}  (view 는 'side' / 'front')
+      warnings  : 분석하지 못한 뷰의 안내 문구 목록 (예: "측면: 몸이 화면에 다 나오지 않았어요…")
       reps      : [{view, rep, fault_count, metrics: [{feature, name, unit, dev, tol,
                                                         ratio, fault}]}]
                   metrics 는 결함 여부와 무관하게 특징별 '가장 나빴던 순간'의 편차.
@@ -195,6 +235,7 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
     """
     items = []
     summary = []
+    rejected = []   # 분석할 수 없었던 뷰의 안내 문구 ("정면: 사람을 찾지 못했어요…")
     stats_reps = []
     rep_count = {}
     videos = {'side': side_video, 'front': front_video}
@@ -202,10 +243,21 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
         video = videos.get(view)
         if not video:
             continue
-        ref_rep = load_reference_rep(exercise, view)
-        user_reps, leg = process_user_video(video, exercise, view, workdir)
-        fps = get_fps(video)
         view_kr = '측면' if view == 'side' else '정면'
+        ref_rep = load_reference_rep(exercise, view)
+        try:
+            user_reps, leg = process_user_video(video, exercise, view, workdir)
+        except PoseInputError as e:
+            rejected.append(f"{view_kr}: {e}")
+            continue
+        # 떨림 수준의 작은 움직임은 반복으로 치지 않는다
+        ref_rom = np.ptp(ref_rep['align_signal'])
+        user_reps = [r for r in user_reps if np.ptp(r['align_signal']) >= MIN_ROM_RATIO * ref_rom]
+        if not user_reps:
+            rejected.append(f"{view_kr}: {EXERCISE_KR[exercise]} 동작을 찾지 못했어요. "
+                            "운동을 1회 이상 수행한 영상인지 확인해 주세요.")
+            continue
+        fps = get_fps(video)
         ref_skel = REFERENCE_SKELETON[exercise][view]
         user_skel = os.path.join(workdir, f"{exercise}_{view}_skeleton.mp4")
 
@@ -274,12 +326,17 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
     # 여러 구간 걸려도 1건으로 센다.
     judged = [m for r in stats_reps for m in r['metrics']]
     score = round(100 * sum(not m['fault'] for m in judged) / len(judged)) if judged else None
-    stats = {'score': score, 'rep_count': rep_count, 'reps': stats_reps}
+    stats = {'score': score, 'rep_count': rep_count, 'reps': stats_reps, 'warnings': rejected}
 
     summary_md = "### 분석 결과\n" + " / ".join(summary) + \
                  "\n\n아래 항목을 클릭하면 모범 자세와 내 자세를 비교할 수 있어요."
+    if rejected:
+        summary_md += "\n\n⚠️ " + "\n\n⚠️ ".join(rejected)
     if not items:
-        if not summary:
+        if rejected:
+            # 올린 영상이 모두 검증에서 걸림 → 뷰별 이유를 그대로 안내
+            summary_md = "⚠️ " + "\n\n⚠️ ".join(rejected)
+        elif not summary:
             # 처리한 뷰가 하나도 없음 = 영상을 안 올림
             summary_md = "⚠️ 영상을 하나 이상 올려주세요."
         else:

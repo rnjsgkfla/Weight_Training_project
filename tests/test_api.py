@@ -18,8 +18,9 @@ FAKE_STATS = {
         {'feature': 'trunk', 'name': '상체 기울기', 'unit': '°', 'dev': -3.0, 'tol': 12.0,
          'ratio': -0.25, 'fault': False},
     ]}],
+    'warnings': [],
 }
-EMPTY_STATS = {'score': None, 'rep_count': {'side': 0}, 'reps': []}
+EMPTY_STATS = {'score': None, 'rep_count': {}, 'reps': [], 'warnings': ['측면: 사람을 찾지 못했어요.']}
 VIDEO = {'side_video': ('s.mp4', b'fake', 'video/mp4')}
 
 

@@ -78,9 +78,11 @@ struct SessionStats: Codable {
     let score: Int?
     let repCount: [String: Int]
     let reps: [RepStats]
+    /// 분석하지 못한 뷰의 안내 (예: "측면: 몸이 화면에 다 나오지 않았어요…")
+    let warnings: [String]?
 
     enum CodingKeys: String, CodingKey {
-        case score, reps
+        case score, reps, warnings
         case repCount = "rep_count"
     }
 }

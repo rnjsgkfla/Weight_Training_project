@@ -29,6 +29,16 @@ struct ResultsView: View {
                 }
             } else {
                 List {
+                    // 측면·정면 중 한쪽만 분석하지 못한 경우 그 이유를 맨 위에 보여준다
+                    if let warnings = response.stats?.warnings, !warnings.isEmpty {
+                        Section {
+                            ForEach(warnings, id: \.self) { w in
+                                Label(w, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                    }
                     if let score = response.stats?.score {
                         Section {
                             HStack {

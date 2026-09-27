@@ -8,23 +8,19 @@ struct ContentView: View {
     @State private var exercise = "squat"
 
     // 측면
-    @State private var sideData: Data?
-    @State private var sideThumb: UIImage?
+    @State private var side = VideoSlot()
     @State private var sideItem: PhotosPickerItem?
     @State private var showSideOptions = false
     @State private var showSidePicker = false
     @State private var showSideCamera = false
     // 정면
-    @State private var frontData: Data?
-    @State private var frontThumb: UIImage?
+    @State private var front = VideoSlot()
     @State private var frontItem: PhotosPickerItem?
     @State private var showFrontOptions = false
     @State private var showFrontPicker = false
     @State private var showFrontCamera = false
 
     @State private var isLoading = false
-    /// 압축 중인 영상 수 (0 보다 크면 분석 버튼 비활성)
-    @State private var preparingCount = 0
     @State private var result: AnalyzeResponse?
     @State private var showResults = false
     @State private var errorMessage: String?
@@ -39,8 +35,10 @@ struct ContentView: View {
     ]
     private var currentViews: Set<String> { exerciseViews[exercise] ?? ["side", "front"] }
 
+    private var isPreparing: Bool { side.isPreparing || front.isPreparing }
+
     private var canAnalyze: Bool {
-        currentViews.contains("side") ? (sideData != nil || frontData != nil) : frontData != nil
+        currentViews.contains("side") ? (side.data != nil || front.data != nil) : front.data != nil
     }
 
     var body: some View {
@@ -50,9 +48,6 @@ struct ContentView: View {
                     hero
                     exerciseSection
                     videoSection
-                    if let errorMessage {
-                        errorBanner(errorMessage)
-                    }
                 }
                 .padding(20)
             }
@@ -61,6 +56,13 @@ struct ContentView: View {
             .safeAreaInset(edge: .bottom) { analyzeBar }
             .navigationDestination(isPresented: $showResults) {
                 if let result { ResultsView(response: result) }
+            }
+            // 분석 오류는 화면 아래에 가려지지 않게 알림창으로 띄운다
+            .alert("분석하지 못했어요", isPresented: Binding(get: { errorMessage != nil },
+                                                        set: { if !$0 { errorMessage = nil } })) {
+                Button("확인", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "")
             }
         }
         .tint(.brand)
@@ -103,8 +105,7 @@ struct ContentView: View {
                 exercise = key
                 // 측면 뷰를 쓰지 않는 운동으로 바꾸면 이전에 골라둔 측면 영상은 비운다
                 if !(exerciseViews[key] ?? []).contains("side") {
-                    sideData = nil
-                    sideThumb = nil
+                    side = VideoSlot()
                     sideItem = nil
                 }
             }
@@ -136,11 +137,11 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(currentViews.count > 1 ? "영상 (하나 이상)" : "영상").font(.headline)
             if currentViews.contains("side") {
-                videoCard("측면 영상", data: $sideData, thumb: $sideThumb, item: $sideItem,
+                videoCard("측면 영상", slot: $side, item: $sideItem,
                           showOptions: $showSideOptions, showPicker: $showSidePicker, showCamera: $showSideCamera)
             }
             if currentViews.contains("front") {
-                videoCard("정면 영상", data: $frontData, thumb: $frontThumb, item: $frontItem,
+                videoCard("정면 영상", slot: $front, item: $frontItem,
                           showOptions: $showFrontOptions, showPicker: $showFrontPicker, showCamera: $showFrontCamera)
             }
             Text("촬영하거나 앨범에서 선택하세요. 전신이 화면에 다 나오게, 5~10회 반복한 60초 이하 영상이 좋아요.")
@@ -151,15 +152,19 @@ struct ContentView: View {
 
     @ViewBuilder
     private func videoCard(_ title: String,
-                           data: Binding<Data?>,
-                           thumb: Binding<UIImage?>,
+                           slot: Binding<VideoSlot>,
                            item: Binding<PhotosPickerItem?>,
                            showOptions: Binding<Bool>,
                            showPicker: Binding<Bool>,
                            showCamera: Binding<Bool>) -> some View {
         Button { showOptions.wrappedValue = true } label: {
             HStack(spacing: 14) {
-                if let img = thumb.wrappedValue {
+                if slot.wrappedValue.isPreparing {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.brand.opacity(0.12))
+                        .frame(width: 76, height: 56)
+                        .overlay(ProgressView())
+                } else if let img = slot.wrappedValue.thumb {
                     Image(uiImage: img)
                         .resizable().scaledToFill()
                         .frame(width: 76, height: 56)
@@ -172,9 +177,16 @@ struct ContentView: View {
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(.body).bold().foregroundStyle(.primary)
-                    Text(thumb.wrappedValue == nil ? "촬영 또는 앨범에서 선택" : "선택됨 · 탭해서 변경")
-                        .font(.caption)
-                        .foregroundStyle(thumb.wrappedValue == nil ? .secondary : Color.brand)
+                    // 오류는 카드 안에 바로 보여준다 (예: 60초 초과)
+                    if let error = slot.wrappedValue.error {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    } else if slot.wrappedValue.isPreparing {
+                        Text("영상 불러오는 중…").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text(slot.wrappedValue.data == nil ? "촬영 또는 앨범에서 선택" : "선택됨 · 탭해서 변경")
+                            .font(.caption)
+                            .foregroundStyle(slot.wrappedValue.data == nil ? .secondary : Color.brand)
+                    }
                 }
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
@@ -190,7 +202,7 @@ struct ContentView: View {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
                     showCamera.wrappedValue = true
                 } else {
-                    errorMessage = "이 기기에서는 카메라를 쓸 수 없어요(시뮬레이터 등). 앨범에서 선택해 주세요."
+                    slot.wrappedValue.error = "이 기기에서는 카메라를 쓸 수 없어요. 앨범에서 선택해 주세요."
                 }
             }
             Button("앨범에서 선택") { showPicker.wrappedValue = true }
@@ -200,19 +212,22 @@ struct ContentView: View {
         .fullScreenCover(isPresented: showCamera) {
             CameraRecorderView { recorded in
                 if let recorded {
-                    Task { await loadVideo(recorded, data: data, thumb: thumb) }
+                    Task { await loadVideo(slot: slot) { recorded } }
                 }
             }
             .ignoresSafeArea()
         }
         .onChange(of: item.wrappedValue) { _, newValue in
+            guard let newValue else { return }
+            // 선택을 바로 비워 둬야 같은 영상을 다시 골라도 onChange 가 불린다
+            item.wrappedValue = nil
             Task {
-                guard let loaded = try? await newValue?.loadTransferable(type: Data.self) else {
-                    data.wrappedValue = nil
-                    thumb.wrappedValue = nil
-                    return
+                await loadVideo(slot: slot) {
+                    guard let movie = try await newValue.loadTransferable(type: MovieFile.self) else {
+                        throw VideoError.unreadable
+                    }
+                    return movie.url
                 }
-                await loadVideo(loaded, data: data, thumb: thumb)
             }
         }
     }
@@ -222,7 +237,7 @@ struct ContentView: View {
     private var analyzeBar: some View {
         Button { Task { await analyze() } } label: {
             Group {
-                if isLoading || preparingCount > 0 {
+                if isLoading || isPreparing {
                     HStack(spacing: 8) {
                         ProgressView().tint(.white)
                         Text(isLoading ? "영상 분석 중… (약 15~30초)" : "영상 준비 중…")
@@ -234,25 +249,14 @@ struct ContentView: View {
             .font(.headline)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-            .background(canAnalyze && !isLoading && preparingCount == 0 ? Color.brand : Color.gray.opacity(0.4))
+            .background(canAnalyze && !isLoading && !isPreparing ? Color.brand : Color.gray.opacity(0.4))
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
-        .disabled(!canAnalyze || isLoading || preparingCount > 0)
+        .disabled(!canAnalyze || isLoading || isPreparing)
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background(.bar)
-    }
-
-    private func errorBanner(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
-            Text(message).font(.subheadline)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color.red.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     // MARK: - 분석 실행
@@ -262,7 +266,7 @@ struct ContentView: View {
         errorMessage = nil
         do {
             let response = try await appState.run {
-                try await $0.analyze(exercise: exercise, sideVideo: sideData, frontVideo: frontData)
+                try await $0.analyze(exercise: exercise, sideVideo: side.data, frontVideo: front.data)
             }
             result = response
             showResults = true
@@ -273,32 +277,55 @@ struct ContentView: View {
         isLoading = false
     }
 
-    /// 고른/촬영한 영상을 540p 로 압축해 담는다 (60초 초과면 오류 안내)
-    private func loadVideo(_ raw: Data, data: Binding<Data?>, thumb: Binding<UIImage?>) async {
-        preparingCount += 1
-        defer { preparingCount -= 1 }
-        errorMessage = nil
+    /// 고른/촬영한 영상 파일을 540p 로 압축해 카드에 담는다 (60초 초과면 카드에 오류 표시).
+    /// 영상을 메모리에 통째로 올리지 않고 파일로 받아 길이부터 확인한다.
+    private func loadVideo(slot: Binding<VideoSlot>, source: () async throws -> URL) async {
+        let loadID = UUID()
+        slot.wrappedValue = VideoSlot(isPreparing: true, loadID: loadID)
+        var result = VideoSlot(loadID: loadID)
         do {
-            let prepared = try await VideoCompressor.prepare(raw)
-            data.wrappedValue = prepared
-            thumb.wrappedValue = await videoThumbnail(from: prepared)
+            let url = try await source()
+            defer { try? FileManager.default.removeItem(at: url) }
+            result.data = try await VideoCompressor.prepare(url)
+            result.thumb = await videoThumbnail(url)
         } catch {
-            data.wrappedValue = nil
-            thumb.wrappedValue = nil
-            errorMessage = error.localizedDescription
+            result.error = error.localizedDescription
+        }
+        // 처리 중에 다른 영상을 새로 골랐으면 이 (오래된) 결과는 버린다
+        if slot.wrappedValue.loadID == loadID { slot.wrappedValue = result }
+    }
+}
+
+/// 영상 카드 하나의 상태
+struct VideoSlot {
+    var data: Data?
+    var thumb: UIImage?
+    var isPreparing = false
+    var error: String?
+    var loadID = UUID()
+}
+
+/// 앨범 영상을 Data 대신 임시 파일로 받는다 (긴 영상도 메모리에 올리지 않음)
+struct MovieFile: Transferable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .movie) { movie in
+            SentTransferredFile(movie.url)
+        } importing: { received in
+            // 받은 파일은 이 블록이 끝나면 지워지므로 임시 폴더로 복사해 둔다
+            let copy = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(received.file.pathExtension)
+            try FileManager.default.copyItem(at: received.file, to: copy)
+            return MovieFile(url: copy)
         }
     }
 }
 
-/// 영상 데이터에서 대표 프레임(약 0.5초 지점) 썸네일을 뽑는다.
-func videoThumbnail(from data: Data) async -> UIImage? {
-    let tmp = FileManager.default.temporaryDirectory
-        .appendingPathComponent(UUID().uuidString + ".mp4")
-    guard (try? data.write(to: tmp)) != nil else { return nil }
-    defer { try? FileManager.default.removeItem(at: tmp) }
-
-    let asset = AVURLAsset(url: tmp)
-    let generator = AVAssetImageGenerator(asset: asset)
+/// 영상 파일에서 대표 프레임(약 0.5초 지점) 썸네일을 뽑는다.
+func videoThumbnail(_ url: URL) async -> UIImage? {
+    let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
     generator.appliesPreferredTrackTransform = true
     let time = CMTime(seconds: 0.5, preferredTimescale: 600)
     guard let result = try? await generator.image(at: time) else { return nil }

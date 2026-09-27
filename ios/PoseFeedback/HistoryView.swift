@@ -1,86 +1,143 @@
 import SwiftUI
 
-/// 기록 탭: 운동 캘린더(연속 기록) + 발전 추이 진입 + 기록 목록
+/// 기록 탭: 운동별 인바디식 리포트(점수·항목별 분석·부위별 상태) + 운동 캘린더 + 기록 목록
 struct HistoryView: View {
     @Environment(AppState.self) private var appState
 
     @State private var sessions: [SessionSummary] = []
+    @State private var points: [ProgressPoint] = []
     @State private var loaded = false
     @State private var errorMessage: String?
-    /// nil = 전체 운동
-    @State private var exerciseFilter: String?
-    /// 캘린더에서 고른 날 (nil = 전체 기간)
+    /// 리포트를 볼 운동 (처음엔 가장 최근에 한 운동)
+    @State private var exercise: String?
+    /// 캘린더에서 고른 날
     @State private var selectedDay: Date?
     @State private var month = Calendar.current.startOfMonth(for: .now)
 
     private let calendar = Calendar.current
 
-    private var filtered: [SessionSummary] {
-        sessions.filter { s in
-            (exerciseFilter == nil || s.exercise == exerciseFilter)
-            && (selectedDay == nil || calendar.isDate(s.createdAt, inSameDayAs: selectedDay!))
-        }
+    private var currentExercise: String { exercise ?? sessions.first?.exercise ?? Exercises.all[0].key }
+
+    /// 운동한 날 (모든 운동)
+    private var workoutDays: Set<Date> { Set(sessions.map { calendar.startOfDay(for: $0.createdAt) }) }
+
+    private var daySessions: [SessionSummary] {
+        guard let selectedDay else { return [] }
+        return sessions.filter { calendar.isDate($0.createdAt, inSameDayAs: selectedDay) }
     }
 
-    /// 운동한 날 (현재 운동 필터 기준)
-    private var workoutDays: Set<Date> {
-        Set(sessions.filter { exerciseFilter == nil || $0.exercise == exerciseFilter }
-            .map { calendar.startOfDay(for: $0.createdAt) })
-    }
+    private var exerciseSessions: [SessionSummary] { sessions.filter { $0.exercise == currentExercise } }
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    Picker("운동", selection: $exerciseFilter) {
-                        Text("전체").tag(String?.none)
-                        ForEach(Exercises.all, id: \.key) { ex in
-                            Text(ex.name).tag(String?.some(ex.key))
-                        }
+            ScrollView {
+                VStack(spacing: 16) {
+                    if let errorMessage {
+                        Label(errorMessage, systemImage: "exclamationmark.circle.fill")
+                            .font(.subheadline).foregroundStyle(.red)
+                            .reportCard()
+                    }
+                    if loaded && sessions.isEmpty {
+                        ContentUnavailableView("아직 기록이 없어요", systemImage: "figure.strengthtraining.traditional",
+                                               description: Text("분석 탭에서 운동 영상을 올리면 여기에 리포트가 쌓여요."))
+                            .padding(.top, 40)
+                    } else if loaded {
+                        exercisePicker
+                        report
+                        calendarCard
+                        recordList
                     }
                 }
-
-                Section {
-                    StreakHeader(days: workoutDays)
-                    MonthCalendar(month: $month, workoutDays: workoutDays, selectedDay: $selectedDay)
-                }
-
-                Section("발전 추이") {
-                    ForEach(Exercises.all.filter { exerciseFilter == nil || $0.key == exerciseFilter }, id: \.key) { ex in
-                        NavigationLink { ProgressChartView(exercise: ex.key) } label: {
-                            Label(ex.name, systemImage: "chart.line.uptrend.xyaxis")
-                        }
-                    }
-                }
-
-                Section {
-                    if loaded && filtered.isEmpty {
-                        Text(selectedDay == nil ? "아직 기록이 없어요. 분석 탭에서 운동 영상을 올려보세요."
-                                                : "이 날은 기록이 없어요.")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    ForEach(filtered) { s in
-                        NavigationLink { SessionDetailView(summary: s) } label: { SessionRow(session: s) }
-                    }
-                    .onDelete(perform: delete)
-                } header: {
-                    HStack {
-                        Text(selectedDay.map { $0.formatted(.dateTime.month().day().weekday()) + " 기록" } ?? "기록")
-                        Spacer()
-                        if selectedDay != nil {
-                            Button("전체 보기") { selectedDay = nil }.font(.caption)
-                        }
-                    }
-                } footer: {
-                    if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
-                }
+                .padding(16)
             }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("기록")
             .overlay { if !loaded && errorMessage == nil { ProgressView() } }
             .refreshable { await load() }
             .task(id: appState.historyVersion) { await load() }
+            .task(id: currentExercise + "\(appState.historyVersion)") { await loadProgress() }
         }
     }
+
+    // MARK: 운동 선택
+
+    private var exercisePicker: some View {
+        Picker("운동", selection: Binding(get: { currentExercise }, set: { exercise = $0 })) {
+            ForEach(Exercises.all, id: \.key) { ex in Text(ex.name).tag(ex.key) }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    // MARK: 리포트 (점수 · 항목별 분석 · 부위별 상태)
+
+    @ViewBuilder
+    private var report: some View {
+        if let latest = points.last {
+            ScoreCard(points: points)
+            FeatureAnalysisCard(latest: latest, previous: points.count >= 2 ? points[points.count - 2] : nil)
+            BodyStatusCard(features: latest.features)
+            NavigationLink { ProgressChartView(exercise: currentExercise) } label: {
+                HStack {
+                    Label("항목별 추이 자세히 보기", systemImage: "chart.line.uptrend.xyaxis")
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                }
+                .reportCard()
+            }
+            .buttonStyle(.plain)
+        } else {
+            Text("\(Exercises.name(currentExercise)) 기록이 아직 없어요. 분석 탭에서 영상을 올려보세요.")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .reportCard()
+        }
+    }
+
+    // MARK: 운동 캘린더 (날짜를 누르면 바로 아래에 그날 기록)
+
+    private var calendarCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("운동 캘린더").font(.headline)
+            StreakHeader(days: workoutDays)
+            MonthCalendar(month: $month, workoutDays: workoutDays, selectedDay: $selectedDay)
+            if let selectedDay {
+                Divider()
+                Text(selectedDay.formatted(.dateTime.month().day().weekday()) + " 기록")
+                    .font(.subheadline.bold())
+                ForEach(daySessions) { s in
+                    NavigationLink { SessionDetailView(summary: s) } label: { SessionRow(session: s) }
+                        .buttonStyle(.plain)
+                }
+            } else {
+                Text("운동한 날을 누르면 그날 기록을 볼 수 있어요.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .reportCard()
+    }
+
+    // MARK: 기록 목록 (선택한 운동)
+
+    private var recordList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("\(Exercises.name(currentExercise)) 기록").font(.headline)
+            if exerciseSessions.isEmpty {
+                Text("아직 기록이 없어요.").font(.subheadline).foregroundStyle(.secondary)
+            }
+            ForEach(exerciseSessions) { s in
+                NavigationLink { SessionDetailView(summary: s) } label: { SessionRow(session: s) }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("기록 삭제", systemImage: "trash", role: .destructive) { delete(s) }
+                    }
+            }
+            if !exerciseSessions.isEmpty {
+                Text("기록을 누른 뒤 오른쪽 위 휴지통으로 삭제할 수 있어요.").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .reportCard()
+    }
+
+    // MARK: 데이터
 
     private func load() async {
         do {
@@ -92,16 +149,24 @@ struct HistoryView: View {
         loaded = true
     }
 
-    private func delete(at offsets: IndexSet) {
-        let targets = offsets.map { filtered[$0] }
+    private func loadProgress() async {
+        do {
+            let ex = currentExercise
+            points = try await appState.run { try await $0.progress(exercise: ex) }.points
+        } catch {
+            points = []
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func delete(_ s: SessionSummary) {
         Task {
-            for s in targets {
-                do {
-                    try await appState.run { try await $0.deleteSession(id: s.id) }
-                    sessions.removeAll { $0.id == s.id }
-                } catch {
-                    errorMessage = error.localizedDescription
-                }
+            do {
+                try await appState.run { try await $0.deleteSession(id: s.id) }
+                sessions.removeAll { $0.id == s.id }
+                await loadProgress()
+            } catch {
+                errorMessage = error.localizedDescription
             }
         }
     }
@@ -156,9 +221,11 @@ struct ScoreBadge: View {
 
 struct SessionDetailView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
     let summary: SessionSummary
     @State private var response: AnalyzeResponse?
     @State private var errorMessage: String?
+    @State private var confirmDelete = false
 
     var body: some View {
         Group {
@@ -172,9 +239,28 @@ struct SessionDetailView: View {
                 ProgressView()
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("삭제", systemImage: "trash") { confirmDelete = true }
+                    .confirmationDialog("이 기록을 삭제할까요?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                        Button("기록 삭제", role: .destructive) { Task { await delete() } }
+                        Button("취소", role: .cancel) {}
+                    }
+            }
+        }
         .task {
             do { response = try await appState.run { try await $0.session(id: summary.id) } }
             catch { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func delete() async {
+        do {
+            try await appState.run { try await $0.deleteSession(id: summary.id) }
+            appState.historyVersion += 1  // 기록 탭 다시 불러오기
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
