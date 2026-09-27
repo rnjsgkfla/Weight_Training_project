@@ -123,6 +123,7 @@ async def analyze(
     - 둘 중 하나만 올려도 된다.
     - 로그인 토큰(Authorization: Bearer)과 함께 호출하면 결과를 기록으로 저장하고
       session_id 를 돌려준다. 반복을 하나도 인식하지 못한 결과는 저장하지 않는다.
+      (점수용 방향 영상이 없어 점수가 null 이어도 피드백은 저장한다)
     """
     if exercise not in REFERENCE:
         raise HTTPException(status_code=400,
@@ -155,7 +156,7 @@ async def analyze(
                 detail=f"'{EXERCISE_KR.get(exercise, exercise)}' 기준 데이터가 아직 준비되지 않았습니다.")
 
         session_id = None
-        if user is not None and stats["score"] is not None:
+        if user is not None and stats["reps"]:  # 반복을 하나라도 분석했으면 저장 (점수가 없어도)
             session_id = await run_in_threadpool(
                 history.save_session, db, user.id, exercise, summary, items, stats, images)
 

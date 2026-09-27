@@ -101,6 +101,10 @@ def extract_front_lateral_raise_features(csv_path):
     feats['elbow_L'] = joint_angle(pt(LEFT['shoulder']), pt(LEFT['elbow']), pt(LEFT['wrist']))
     feats['elbow_R'] = joint_angle(pt(RIGHT['shoulder']), pt(RIGHT['elbow']), pt(RIGHT['wrist']))
 
+    # 좌우 어깨 각도: 골반–어깨–팔꿈치 세 점 각 (점수 계산용). 0=팔이 몸통에 붙음, ~90=수평.
+    feats['shoulder_L'] = joint_angle(pt(LEFT['hip']), pt(LEFT['shoulder']), pt(LEFT['elbow']))
+    feats['shoulder_R'] = joint_angle(pt(RIGHT['hip']), pt(RIGHT['shoulder']), pt(RIGHT['elbow']))
+
     # 몸통 기울기: 골반중심→어깨중심 분절이 수직축과 이루는 각(정면이므로 좌우 기울임을 측정).
     # 반동을 쓰려고 몸을 옆으로 기울이면 커진다.
     hip_center  = (pt(LEFT['hip']) + pt(RIGHT['hip'])) / 2

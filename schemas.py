@@ -47,8 +47,24 @@ class RepStats(BaseModel):
     metrics: list[RepMetric]
 
 
+class ScoreItem(BaseModel):
+    item: str               # 점수 항목 식별자 (예: knee, pelvis)
+    name: str               # 한글 이름 (예: 무릎 각도)
+    weight: float           # 가중치 (운동별 합 1.00)
+    unit: str = ''          # ° (각도) 또는 빈 문자열 (위치, 상체 길이=1 단위)
+    tolerance: float        # 허용 오차 T (°, 또는 상체 길이=1 단위)
+    mean_error: float       # DTW 대응쌍 평균 절대 오차 D
+    normalized_error: float # e = min(D / T, 1)
+
+
+class ScoreDetail(BaseModel):
+    combined_error: float   # E = Σ weight × e
+    items: list[ScoreItem]
+
+
 class SessionStats(BaseModel):
-    score: int | None           # 0~100, 판정한 반복이 없으면 null
+    score: int | None           # 0~100 = 100 × (1 − E). 점수용 방향 영상이 없으면 null
+    score_detail: ScoreDetail | None = None
     rep_count: dict[str, int]   # {view: 반복 수}
     reps: list[RepStats]
     warnings: list[str] = []    # 분석하지 못한 뷰의 안내 (사람 없음·전신 안 보임 등)

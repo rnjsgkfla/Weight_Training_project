@@ -76,6 +76,8 @@ struct RepStats: Codable {
 
 struct SessionStats: Codable {
     let score: Int?
+    /// 점수 계산 내역 (옛 기록이나 점수가 없는 경우 nil)
+    let scoreDetail: ScoreDetail?
     let repCount: [String: Int]
     let reps: [RepStats]
     /// 분석하지 못한 뷰의 안내 (예: "측면: 몸이 화면에 다 나오지 않았어요…")
@@ -83,7 +85,37 @@ struct SessionStats: Codable {
 
     enum CodingKeys: String, CodingKey {
         case score, reps, warnings
+        case scoreDetail = "score_detail"
         case repCount = "rep_count"
+    }
+}
+
+/// 점수 = 100 × (1 − Σ 가중치 × 정규화 오차)
+struct ScoreDetail: Codable {
+    let combinedError: Double
+    let items: [ScoreItem]
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case combinedError = "combined_error"
+    }
+}
+
+struct ScoreItem: Codable {
+    let item: String
+    let name: String
+    let weight: Double
+    let unit: String?
+    let tolerance: Double
+    /// DTW 대응쌍 평균 절대 오차 D
+    let meanError: Double
+    /// e = min(D / T, 1)
+    let normalizedError: Double
+
+    enum CodingKeys: String, CodingKey {
+        case item, name, weight, unit, tolerance
+        case meanError = "mean_error"
+        case normalizedError = "normalized_error"
     }
 }
 

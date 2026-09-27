@@ -21,7 +21,12 @@ def result(tmp_path_factory):
 def test_rep_count_and_score(result):
     _items, _summary, stats = result
     assert stats['rep_count'] == {'side': 4, 'front': 5}
-    assert stats['score'] == 47
+    # 점수(scoring.py)는 측면 영상으로 계산: 얕은 스쿼트라 무릎 각도·골반 높이 오차가 허용 오차를 넘는다
+    assert stats['score'] == 12
+    items = {i['item']: i for i in stats['score_detail']['items']}
+    assert items['knee']['normalized_error'] == 1.0
+    assert items['pelvis']['normalized_error'] == 1.0
+    assert 0 < items['torso']['normalized_error'] < 1
 
 
 def test_faulted_features_per_rep(result):

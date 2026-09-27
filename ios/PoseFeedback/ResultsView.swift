@@ -46,8 +46,11 @@ struct ResultsView: View {
                                 Spacer()
                                 ScoreBadge(score: score)
                             }
+                            if let detail = response.stats?.scoreDetail {
+                                ForEach(detail.items, id: \.item) { ScoreItemRow(item: $0) }
+                            }
                         } footer: {
-                            Text("회차별 판정 항목 중 모범 자세 기준 범위 안에 든 비율이에요.")
+                            Text("모범 동작과 같은 순간끼리 비교한 평균 오차를 항목별 허용 오차로 나눠 가중 합산했어요. 막대가 짧을수록 모범에 가까워요.")
                         }
                     }
                     ForEach(groups, id: \.view) { group in
@@ -68,6 +71,31 @@ struct ResultsView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - 점수 항목 행 (평균 오차 / 허용 오차 막대)
+
+struct ScoreItemRow: View {
+    let item: ScoreItem
+
+    private var unit: String { item.unit ?? "" }
+    private var format: String { unit.isEmpty ? "%.2f" : "%.1f" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(item.name).font(.subheadline)
+                Text("\(Int((item.weight * 100).rounded()))%")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text("평균 오차 \(String(format: format, item.meanError))\(unit) / 허용 \(String(format: format, item.tolerance))\(unit)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ProgressView(value: item.normalizedError)
+                .tint(item.normalizedError < 0.34 ? .green : item.normalizedError < 0.67 ? .orange : .red)
+        }
+        .padding(.vertical, 2)
     }
 }
 

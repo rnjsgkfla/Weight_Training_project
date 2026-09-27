@@ -18,9 +18,11 @@ FAKE_STATS = {
         {'feature': 'trunk', 'name': '상체 기울기', 'unit': '°', 'dev': -3.0, 'tol': 12.0,
          'ratio': -0.25, 'fault': False},
     ]}],
+    'score_detail': None,
     'warnings': [],
 }
-EMPTY_STATS = {'score': None, 'rep_count': {}, 'reps': [], 'warnings': ['측면: 사람을 찾지 못했어요.']}
+EMPTY_STATS = {'score': None, 'score_detail': None, 'rep_count': {}, 'reps': [],
+               'warnings': ['측면: 사람을 찾지 못했어요.']}
 VIDEO = {'side_video': ('s.mp4', b'fake', 'video/mp4')}
 
 
@@ -60,6 +62,17 @@ def test_analyze_with_no_reps_is_not_saved(client, monkeypatch):
     assert res.json()['stats'] == EMPTY_STATS
     assert res.json()['session_id'] is None
     assert client.get('/sessions', headers=headers).json() == []
+
+
+def test_analyze_without_score_is_still_saved(client, monkeypatch):
+    # 스쿼트 정면 영상만 올리면 점수는 없지만(측면 필요) 피드백은 기록으로 남긴다
+    front_only = dict(FAKE_STATS, score=None,
+                      warnings=['점수: 측면 영상이 있어야 점수를 계산할 수 있어요.'])
+    monkeypatch.setattr(api, 'analyze_for_ui', lambda *a, **k: ([FAKE_ITEM], '요약', front_only))
+    headers = signup(client)
+    res = post_analyze(client, headers)
+    assert res.status_code == 200
+    assert isinstance(res.json()['session_id'], int)
 
 
 def test_analyze_with_invalid_token_is_rejected(client):

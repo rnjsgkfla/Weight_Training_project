@@ -27,6 +27,7 @@ from normalize_landmarks import normalize_csv
 from features import extract_and_save
 from rep_features import slice_reps
 from judge import judge_rep, format_feedback, PHASE_LABELS
+from scoring import SCORE_FUNCTIONS, SCORE_VIEW
 
 # 기준(템플릿) 영상의 특징/스무딩 CSV — 운동·뷰별 1 rep
 REFERENCE = {
@@ -221,7 +222,10 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
       ok          : 결함 없이 '양호'한 항목이면 True
 
     stats (히스토리·발전 추이 저장용):
-      score     : 0~100. (회차×특징) 판정 중 결함이 없었던 비율. 판정한 반복이 없으면 None
+      score     : 0~100 자세 점수 (scoring.py: DTW 특징별 평균 오차 → 정규화 → 가중합).
+                  점수용 방향(스쿼트·런지=측면, 사레레=정면) 영상이 없거나 반복이 없으면 None
+      score_detail : 점수 계산 내역 {combined_error, items: [{item, name, weight, tolerance,
+                     mean_error, normalized_error}]} (score 가 None 이면 None)
       rep_count : {view: 반복 수}  (view 는 'side' / 'front')
       warnings  : 분석하지 못한 뷰의 안내 문구 목록 (예: "측면: 몸이 화면에 다 나오지 않았어요…")
       reps      : [{view, rep, fault_count, metrics: [{feature, name, unit, dev, tol,
@@ -238,6 +242,7 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
     rejected = []   # 분석할 수 없었던 뷰의 안내 문구 ("정면: 사람을 찾지 못했어요…")
     stats_reps = []
     rep_count = {}
+    score_aligned = []  # 점수용 (모범 반복, 사용자 반복, DTW 경로) 목록
     videos = {'side': side_video, 'front': front_video}
     for view in REFERENCE[exercise]:
         video = videos.get(view)
@@ -265,6 +270,8 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
         n_fault = 0
         for k, rep in enumerate(user_reps, 1):
             faults, meta = judge_rep(ref_rep, rep, exercise=exercise)
+            if view == SCORE_VIEW[exercise]:
+                score_aligned.append((ref_rep, rep, meta['path']))
             fault_feats = {f['feature'] for f in faults}
             stats_reps.append({
                 'view': view, 'rep': k, 'fault_count': len(faults),
@@ -322,11 +329,14 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
         summary.append(f"**{view_kr}**: {len(user_reps)}회 · 지적 {n_fault}건")
         rep_count[view] = len(user_reps)
 
-    # 점수: (회차×특징) 판정 중 결함 없이 통과한 비율. 한 회차에서 같은 특징이
-    # 여러 구간 걸려도 1건으로 센다.
-    judged = [m for r in stats_reps for m in r['metrics']]
-    score = round(100 * sum(not m['fault'] for m in judged) / len(judged)) if judged else None
-    stats = {'score': score, 'rep_count': rep_count, 'reps': stats_reps, 'warnings': rejected}
+    # 점수: 점수용 방향 영상의 모든 회차 DTW 대응쌍으로 계산 (scoring.py)
+    score_detail = SCORE_FUNCTIONS[exercise](score_aligned) if score_aligned else None
+    score = round(score_detail['score']) if score_detail else None
+    if score is None and stats_reps:
+        view_kr = '측면' if SCORE_VIEW[exercise] == 'side' else '정면'
+        rejected.append(f"점수: {view_kr} 영상이 있어야 점수를 계산할 수 있어요. 피드백은 그대로 확인할 수 있어요.")
+    stats = {'score': score, 'score_detail': score_detail, 'rep_count': rep_count,
+             'reps': stats_reps, 'warnings': rejected}
 
     summary_md = "### 분석 결과\n" + " / ".join(summary) + \
                  "\n\n아래 항목을 클릭하면 모범 자세와 내 자세를 비교할 수 있어요."
