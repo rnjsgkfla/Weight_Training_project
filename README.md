@@ -12,7 +12,7 @@ MediaPipe 로 관절을 뽑아 정규화·DTW 정렬 후 규칙 기반으로 결
 |---|---|---|
 | GET | `/health` | 헬스 체크 |
 | GET | `/exercises` | 지원 운동과 필요한 뷰 목록 |
-| POST | `/analyze` | multipart: `exercise`, `side_video`, `front_video` → 반복별 피드백 + 비교 이미지 + 통계(`stats`: 점수·반복 수·회차별 측정값) JSON. 로그인 토큰을 보내면 기록으로 저장하고 `session_id` 반환 |
+| POST | `/analyze` | multipart: `exercise`, `side_video`, `front_video` → 반복별 피드백 + 비교 이미지 + 통계(`stats`: 점수·반복 수·회차별 측정값) JSON. 로그인 토큰을 보내면 기록으로 저장하고 `session_id` 반환. 사람이 없거나 전신이 안 보이는 영상은 분석하지 않고 `stats.warnings` 로 이유를 알려준다 |
 | POST | `/auth/signup` | JSON `{email, password(8자 이상)}` → `{access_token}` (가입 후 바로 로그인) |
 | POST | `/auth/login` | JSON `{email, password}` → `{access_token}` (유효기간 30일) |
 | GET / DELETE | `/me` 🔒 | 내 계정 조회 / 회원 탈퇴 (기록·이미지 모두 삭제) |

@@ -2,11 +2,14 @@ import AVFoundation
 
 enum VideoError: LocalizedError {
     case tooLong(Double)
+    case unreadable
 
     var errorDescription: String? {
         switch self {
         case .tooLong(let sec):
-            return "영상이 너무 길어요 (\(Int(sec))초). \(Int(VideoCompressor.maxDuration))초 이하로 잘라서 올려주세요. 5~10회 반복이면 충분해요."
+            return "\(Int(sec))초 영상이에요. \(Int(VideoCompressor.maxDuration))초 이하로 잘라서 올려주세요."
+        case .unreadable:
+            return "영상을 불러오지 못했어요. 다른 영상을 선택해 주세요."
         }
     }
 }
@@ -19,22 +22,18 @@ enum VideoError: LocalizedError {
 enum VideoCompressor {
     static let maxDuration: Double = 60
 
-    static func prepare(_ data: Data) async throws -> Data {
-        let dir = FileManager.default.temporaryDirectory
-        let src = dir.appendingPathComponent(UUID().uuidString + ".mp4")
-        let dst = dir.appendingPathComponent(UUID().uuidString + ".mp4")
-        try data.write(to: src)
-        defer {
-            try? FileManager.default.removeItem(at: src)
-            try? FileManager.default.removeItem(at: dst)
-        }
-
+    /// 영상 파일(src)을 압축해 업로드할 Data 를 돌려준다. 길이부터 확인해 긴 영상은 바로 거부한다.
+    static func prepare(_ src: URL) async throws -> Data {
         let asset = AVURLAsset(url: src)
-        let duration = try await asset.load(.duration).seconds
+        guard let duration = try? await asset.load(.duration).seconds, duration > 0 else {
+            throw VideoError.unreadable
+        }
         guard duration <= maxDuration else { throw VideoError.tooLong(duration) }
 
+        let dst = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
+        defer { try? FileManager.default.removeItem(at: dst) }
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset960x540) else {
-            return data  // 압축할 수 없는 형식이면 원본 그대로
+            return try Data(contentsOf: src)  // 압축할 수 없는 형식이면 원본 그대로
         }
         if #available(iOS 18, *) {
             try await session.export(to: dst, as: .mp4)
@@ -44,7 +43,9 @@ enum VideoCompressor {
             await session.export()
             if let error = session.error { throw error }
         }
-        let compressed = try Data(contentsOf: dst)
-        return compressed.count < data.count ? compressed : data
+        // 원본이 이미 더 작으면(이미 압축된 영상) 원본을 보낸다
+        let srcSize = (try? src.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? .max
+        let dstSize = (try? dst.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? .max
+        return try Data(contentsOf: dstSize < srcSize ? dst : src)
     }
 }

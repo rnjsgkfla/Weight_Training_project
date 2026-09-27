@@ -51,6 +51,7 @@ class SessionStats(BaseModel):
     score: int | None           # 0~100, 판정한 반복이 없으면 null
     rep_count: dict[str, int]   # {view: 반복 수}
     reps: list[RepStats]
+    warnings: list[str] = []    # 분석하지 못한 뷰의 안내 (사람 없음·전신 안 보임 등)
 
 
 class AnalyzeResponse(BaseModel):
