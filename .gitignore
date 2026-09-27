@@ -30,6 +30,8 @@ data/raw/*
 clone-temp/
 
 *.mov
+# 사이드 레터럴 레이즈 기준(모범) 영상은 서버 빌드에 필요하므로 포함 (테스트용 user*.MOV 는 제외)
+!data/raw/sidelateralraise_front_raw.mov
 
 # 개인 포트폴리오 정리 (git 미포함)
 PORTFOLIO.md

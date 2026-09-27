@@ -21,6 +21,8 @@ targets:
       path: PoseFeedback/Info.plist
       properties:
         CFBundleDisplayName: 운동 피드백
+        # 한국어 앱: 날짜·요일 표기와 시스템 메뉴(붙여넣기 등)를 한국어로
+        CFBundleDevelopmentRegion: ko
         # 런치 화면: 브랜드 색 배경 + 중앙 로고
         UILaunchScreen:
           UIColorName: BrandColor

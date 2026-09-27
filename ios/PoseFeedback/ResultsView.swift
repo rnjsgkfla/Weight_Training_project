@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ResultsView: View {
     let response: AnalyzeResponse
+    var title = "분석 결과"
 
     /// 측면/정면 등 뷰 순서를 유지하며 그룹화
     private var groups: [(view: String, items: [FeedbackItem])] {
@@ -28,6 +29,17 @@ struct ResultsView: View {
                 }
             } else {
                 List {
+                    if let score = response.stats?.score {
+                        Section {
+                            HStack {
+                                Text("자세 점수").font(.headline)
+                                Spacer()
+                                ScoreBadge(score: score)
+                            }
+                        } footer: {
+                            Text("회차별 판정 항목 중 모범 자세 기준 범위 안에 든 비율이에요.")
+                        }
+                    }
                     ForEach(groups, id: \.view) { group in
                         Section {
                             ForEach(group.items) { item in
@@ -44,7 +56,7 @@ struct ResultsView: View {
                 }
             }
         }
-        .navigationTitle("분석 결과")
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
     }
 }
