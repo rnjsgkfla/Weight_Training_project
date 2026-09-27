@@ -12,7 +12,7 @@ MediaPipe 로 관절을 뽑아 정규화·DTW 정렬 후 규칙 기반으로 결
 |---|---|---|
 | GET | `/health` | 헬스 체크 |
 | GET | `/exercises` | 지원 운동과 필요한 뷰 목록 |
-| POST | `/analyze` | multipart: `exercise`, `side_video`, `front_video` → 반복별 피드백 + 비교 이미지 JSON |
+| POST | `/analyze` | multipart: `exercise`, `side_video`, `front_video` → 반복별 피드백 + 비교 이미지 + 통계(`stats`: 점수·반복 수·회차별 측정값) JSON |
 | GET | `/docs` | 자동 생성 API 문서(Swagger) |
 
 예시:
@@ -79,6 +79,15 @@ docker stop <ID>        # 백엔드 중지
 docker run -p 8000:8080 pose-api   # 다시 실행 (이미지 남아있어 재빌드 불필요)
 ```
 
+## 테스트
+```bash
+./venv/bin/pip install -r requirements-dev.txt
+python build_references.py            # 기준 데이터가 없으면 먼저 생성 (없으면 관련 테스트는 skip)
+./venv/bin/python -m pytest tests
+```
+`test_analyze_regression.py` 는 샘플 영상(`data/raw/user_squat_*`)의 반복 수·점수·지적 항목을
+고정해 둔 회귀 테스트다. 판정 규칙을 의도적으로 바꿨다면 기대값을 함께 갱신한다.
+
 ## 웹 데모 (Gradio)
 ```bash
 ./venv/bin/pip install -r requirements.txt   # gradio 포함
@@ -102,4 +111,5 @@ dtw.py                 DTW 위상 정렬
 judge.py               운동별 규칙 판정 + 피드백 생성
 app.py                 Gradio 웹 UI
 ios/                   iOS 앱 (SwiftUI) — project.yml 로 xcodegen 생성
+tests/                 pytest (판정 수치 단위 테스트 · 샘플 영상 회귀 · API 스키마)
 ```

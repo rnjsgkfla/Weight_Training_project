@@ -1,0 +1,4 @@
+# 테스트 전용 의존성 (API 의존성 위에 추가 설치)
+-r requirements-api.txt
+pytest
+httpx

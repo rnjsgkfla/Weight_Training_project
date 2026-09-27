@@ -53,10 +53,34 @@ class FeedbackItem(BaseModel):
     message: str | None = None       # 교정 문구
 
 
+class RepMetric(BaseModel):
+    feature: str        # 특징 식별자 (예: knee)
+    name: str           # 한글 이름 (예: 무릎 깊이)
+    unit: str           # 단위 (° 또는 빈 문자열)
+    dev: float          # 가장 나빴던 순간의 편차 (내 − 모범, asym 은 절대값)
+    tol: float          # 허용오차
+    ratio: float        # 벗어난 정도 / 허용오차 (1 초과면 허용오차 밖, 0 이하면 기준보다 나쁜 적 없음)
+    fault: bool         # 이 회차에서 결함으로 지적됐는지 (순간적 이탈은 ratio > 1 이어도 False)
+
+
+class RepStats(BaseModel):
+    view: str           # side / front
+    rep: int            # 회차
+    fault_count: int
+    metrics: list[RepMetric]
+
+
+class SessionStats(BaseModel):
+    score: int | None           # 0~100, 판정한 반복이 없으면 null
+    rep_count: dict[str, int]   # {view: 반복 수}
+    reps: list[RepStats]
+
+
 class AnalyzeResponse(BaseModel):
     exercise: str
     summary: str
     items: list[FeedbackItem]
+    stats: SessionStats         # 히스토리·발전 추이용 구조화 수치
 
 
 # ── 헬퍼 ───────────────────────────────────────────────────────────────────────
@@ -101,7 +125,7 @@ def _analyze_and_encode(exercise, side_path, front_path, workdir):
     OpenCV/MediaPipe 는 CPU·IO 를 오래 잡는 동기 코드라, 엔드포인트에서 이 함수를
     스레드풀로 오프로드해 이벤트 루프가 막히지 않게 한다.
     """
-    items, summary = analyze_for_ui(exercise, side_path, front_path, workdir=workdir)
+    items, summary, stats = analyze_for_ui(exercise, side_path, front_path, workdir=workdir)
     out_items = [
         FeedbackItem(
             key=it["key"], label=it["label"], detail=it["detail"], ok=it["ok"],
@@ -114,7 +138,7 @@ def _analyze_and_encode(exercise, side_path, front_path, workdir):
         )
         for it in items
     ]
-    return summary, out_items
+    return summary, out_items, stats
 
 
 # ── 엔드포인트 ─────────────────────────────────────────────────────────────────
@@ -160,7 +184,7 @@ async def analyze(
 
         try:
             # 무거운 동기 작업은 스레드풀로 오프로드 (이벤트 루프 블로킹 방지)
-            summary, out_items = await run_in_threadpool(
+            summary, out_items, stats = await run_in_threadpool(
                 _analyze_and_encode, exercise, paths.get("side"), paths.get("front"), workdir)
         except ValueError as e:
             # 읽을 수 없는/빈 영상 등 잘못된 입력 → 사용자 잘못이므로 400
@@ -171,6 +195,6 @@ async def analyze(
                 status_code=503,
                 detail=f"'{EXERCISE_KR.get(exercise, exercise)}' 기준 데이터가 아직 준비되지 않았습니다.")
 
-        return AnalyzeResponse(exercise=exercise, summary=summary, items=out_items)
+        return AnalyzeResponse(exercise=exercise, summary=summary, items=out_items, stats=stats)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

@@ -180,9 +180,23 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
       ref_video   : 모범 뼈대 영상 경로,  ref_frame : 그 안의 비교 프레임
       user_video  : 사용자 뼈대 영상 경로, user_frame: 그 안의 비교 프레임
       ok          : 결함 없이 '양호'한 항목이면 True
+
+    stats (히스토리·발전 추이 저장용):
+      score     : 0~100. (회차×특징) 판정 중 결함이 없었던 비율. 판정한 반복이 없으면 None
+      rep_count : {view: 반복 수}  (view 는 'side' / 'front')
+      reps      : [{view, rep, fault_count, metrics: [{feature, name, unit, dev, tol,
+                                                        ratio, fault}]}]
+                  metrics 는 결함 여부와 무관하게 특징별 '가장 나빴던 순간'의 편차.
+                  ratio = 벗어난 정도 / 허용오차 (1 초과면 허용오차 밖, 0 이하면 기준보다
+                  나쁜 쪽으로 간 적 없음). ratio > 1 이어도 순간적이면(min_len 미만) fault 는 False
+
+    Returns:
+      (items, summary_md, stats)
     """
     items = []
     summary = []
+    stats_reps = []
+    rep_count = {}
     videos = {'side': side_video, 'front': front_video}
     for view in REFERENCE[exercise]:
         video = videos.get(view)
@@ -198,7 +212,18 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
         peak_label = PHASE_LABELS.get(exercise, PHASE_LABELS['squat'])[1]
         n_fault = 0
         for k, rep in enumerate(user_reps, 1):
-            faults, _meta = judge_rep(ref_rep, rep, exercise=exercise)
+            faults, meta = judge_rep(ref_rep, rep, exercise=exercise)
+            fault_feats = {f['feature'] for f in faults}
+            stats_reps.append({
+                'view': view, 'rep': k, 'fault_count': len(faults),
+                'metrics': [
+                    {'feature': feat, 'name': FEATURE_KR.get(feat, feat),
+                     'unit': FEATURE_UNIT.get(feat, ''),
+                     'dev': round(m['dev'], 3), 'tol': m['tol'],
+                     'ratio': round(m['ratio'], 2), 'fault': feat in fault_feats}
+                    for feat, m in meta['metrics'].items()
+                ],
+            })
             if not faults:
                 # 양호한 반복: 극점끼리 비교를 보여준다
                 items.append({
@@ -243,6 +268,13 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
                     'message': f['message'],
                 })
         summary.append(f"**{view_kr}**: {len(user_reps)}회 · 지적 {n_fault}건")
+        rep_count[view] = len(user_reps)
+
+    # 점수: (회차×특징) 판정 중 결함 없이 통과한 비율. 한 회차에서 같은 특징이
+    # 여러 구간 걸려도 1건으로 센다.
+    judged = [m for r in stats_reps for m in r['metrics']]
+    score = round(100 * sum(not m['fault'] for m in judged) / len(judged)) if judged else None
+    stats = {'score': score, 'rep_count': rep_count, 'reps': stats_reps}
 
     summary_md = "### 분석 결과\n" + " / ".join(summary) + \
                  "\n\n아래 항목을 클릭하면 모범 자세와 내 자세를 비교할 수 있어요."
@@ -254,7 +286,7 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
             # 영상은 처리했으나 반복(또는 사람)을 인식 못 함
             summary_md = ("⚠️ 사람 또는 반복 동작을 인식하지 못했어요.\n\n"
                           "전신이 화면에 다 나오게, 운동을 1회 이상 수행한 영상을 올려주세요.")
-    return items, summary_md
+    return items, summary_md, stats
 
 
 def analyze(exercise='squat', side_video=None, front_video=None, workdir="data/processed/_user"):
