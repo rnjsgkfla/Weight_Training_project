@@ -173,7 +173,8 @@ def judge_rep(ref_rep, user_rep, exercise='squat', rules=None, min_len=5):
 
     Returns:
         faults : [{feature, message, phase, frame_start, frame_end, max_dev}, ...]
-        meta   : {'path', 'norm_dist', 'user_bottom'}
+        meta   : {'path', 'norm_dist', 'user_bottom',
+                  'metrics': {feature: {'dev', 'tol', 'ratio'}}  # 결함 여부와 무관한 특징별 최악 편차}
     """
     if rules is None:
         rules = FAULT_RULES_BY_EXERCISE.get(exercise, SQUAT_FAULT_RULES)
@@ -183,6 +184,7 @@ def judge_rep(ref_rep, user_rep, exercise='squat', rules=None, min_len=5):
     user_start_f = user_rep['start_f']
 
     faults = []
+    metrics = {}
     for feat, (direction, tol, msg) in rules.items():
         if feat not in ref_rep['features'] or feat not in user_rep['features']:
             continue  # 이 뷰에 없는 특징은 건너뜀
@@ -209,6 +211,19 @@ def judge_rep(ref_rep, user_rep, exercise='squat', rules=None, min_len=5):
                 else:  # two_sided
                     bad = abs(dev) > tol
             bad_flags.append(bad); devs.append(dev); js.append(j); irefs.append(i)
+
+        # 결함 여부와 무관하게 '나쁜 방향으로 가장 크게 벗어난 순간'을 기록한다
+        # (히스토리·발전 추이용). ratio = 벗어난 정도 / 허용오차 → 1 초과면 허용오차 밖.
+        devs_arr = np.array(devs)
+        if direction == 'high_bad':
+            badness = devs_arr
+        elif direction == 'low_bad':
+            badness = -devs_arr
+        else:  # two_sided, asym(이미 절대값)
+            badness = np.abs(devs_arr)
+        w = int(np.argmax(badness))
+        metrics[feat] = {'dev': float(devs_arr[w]), 'tol': tol,
+                         'ratio': float(badness[w] / tol)}
 
         # min_len 이상 연속으로 결함인 구간 추출
         k = 0
@@ -241,7 +256,8 @@ def judge_rep(ref_rep, user_rep, exercise='squat', rules=None, min_len=5):
             else:
                 k += 1
 
-    meta = {'path': path, 'norm_dist': norm_dist, 'user_bottom': user_bottom}
+    meta = {'path': path, 'norm_dist': norm_dist, 'user_bottom': user_bottom,
+            'metrics': metrics}
     return faults, meta
 
 

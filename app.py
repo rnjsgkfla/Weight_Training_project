@@ -31,7 +31,7 @@ def run(exercise_label, side_video, front_video):
         return ("⚠️ 영상을 하나 이상 올려주세요.",
                 gr.update(choices=[], value=None), [], None, None, EMPTY_DETAIL)
 
-    items, summary = analyze_for_ui(exercise, side_video, front_video)
+    items, summary, _stats = analyze_for_ui(exercise, side_video, front_video)
     # 선택지는 (표시 라벨, 내부 key) 쌍으로 준다 — 라벨 문구가 우연히 같아도
     # Radio 가 실제로 고르는 값은 항상 고유한 key 라 선택이 절대 겹치지 않는다.
     choices = [(it['label'], it['key']) for it in items]
