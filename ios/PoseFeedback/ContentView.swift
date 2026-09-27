@@ -4,6 +4,7 @@ import AVFoundation
 import UIKit
 
 struct ContentView: View {
+    @Environment(AppState.self) private var appState
     @State private var exercise = "squat"
 
     // 측면
@@ -22,14 +23,13 @@ struct ContentView: View {
     @State private var showFrontCamera = false
 
     @State private var isLoading = false
+    /// 압축 중인 영상 수 (0 보다 크면 분석 버튼 비활성)
+    @State private var preparingCount = 0
     @State private var result: AnalyzeResponse?
     @State private var showResults = false
     @State private var errorMessage: String?
 
-    private let exercises = [("squat", "스쿼트", "figure.strengthtraining.traditional"),
-                            ("lunge", "런지", "figure.strengthtraining.functional"),
-                            ("lateral_raise", "사이드 레터럴 레이즈", "figure.arms.open")]
-    private let api = APIClient()
+    private let exercises = Exercises.all
 
     /// 운동별로 필요한 영상 뷰 (api.py REFERENCE 와 1:1 — 사이드 레터럴 레이즈는 정면만 쓴다)
     private let exerciseViews: [String: Set<String>] = [
@@ -143,7 +143,7 @@ struct ContentView: View {
                 videoCard("정면 영상", data: $frontData, thumb: $frontThumb, item: $frontItem,
                           showOptions: $showFrontOptions, showPicker: $showFrontPicker, showCamera: $showFrontCamera)
             }
-            Text("촬영하거나 앨범에서 선택하세요. 전신이 화면에 다 나오게, 운동을 1회 이상 수행한 영상이어야 합니다.")
+            Text("촬영하거나 앨범에서 선택하세요. 전신이 화면에 다 나오게, 5~10회 반복한 60초 이하 영상이 좋아요.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -200,17 +200,19 @@ struct ContentView: View {
         .fullScreenCover(isPresented: showCamera) {
             CameraRecorderView { recorded in
                 if let recorded {
-                    data.wrappedValue = recorded
-                    Task { thumb.wrappedValue = await videoThumbnail(from: recorded) }
+                    Task { await loadVideo(recorded, data: data, thumb: thumb) }
                 }
             }
             .ignoresSafeArea()
         }
         .onChange(of: item.wrappedValue) { _, newValue in
             Task {
-                let loaded = try? await newValue?.loadTransferable(type: Data.self)
-                data.wrappedValue = loaded
-                thumb.wrappedValue = loaded == nil ? nil : await videoThumbnail(from: loaded!)
+                guard let loaded = try? await newValue?.loadTransferable(type: Data.self) else {
+                    data.wrappedValue = nil
+                    thumb.wrappedValue = nil
+                    return
+                }
+                await loadVideo(loaded, data: data, thumb: thumb)
             }
         }
     }
@@ -220,10 +222,10 @@ struct ContentView: View {
     private var analyzeBar: some View {
         Button { Task { await analyze() } } label: {
             Group {
-                if isLoading {
+                if isLoading || preparingCount > 0 {
                     HStack(spacing: 8) {
                         ProgressView().tint(.white)
-                        Text("영상 분석 중… (약 15~30초)")
+                        Text(isLoading ? "영상 분석 중… (약 15~30초)" : "영상 준비 중…")
                     }
                 } else {
                     Text("분석하기")
@@ -232,11 +234,11 @@ struct ContentView: View {
             .font(.headline)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-            .background(canAnalyze && !isLoading ? Color.brand : Color.gray.opacity(0.4))
+            .background(canAnalyze && !isLoading && preparingCount == 0 ? Color.brand : Color.gray.opacity(0.4))
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
-        .disabled(!canAnalyze || isLoading)
+        .disabled(!canAnalyze || isLoading || preparingCount > 0)
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background(.bar)
@@ -259,14 +261,32 @@ struct ContentView: View {
         isLoading = true
         errorMessage = nil
         do {
-            result = try await api.analyze(exercise: exercise,
-                                           sideVideo: sideData,
-                                           frontVideo: frontData)
+            let response = try await appState.run {
+                try await $0.analyze(exercise: exercise, sideVideo: sideData, frontVideo: frontData)
+            }
+            result = response
             showResults = true
+            if response.sessionId != nil { appState.historyVersion += 1 }  // 기록 탭 새로고침
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// 고른/촬영한 영상을 540p 로 압축해 담는다 (60초 초과면 오류 안내)
+    private func loadVideo(_ raw: Data, data: Binding<Data?>, thumb: Binding<UIImage?>) async {
+        preparingCount += 1
+        defer { preparingCount -= 1 }
+        errorMessage = nil
+        do {
+            let prepared = try await VideoCompressor.prepare(raw)
+            data.wrappedValue = prepared
+            thumb.wrappedValue = await videoThumbnail(from: prepared)
+        } catch {
+            data.wrappedValue = nil
+            thumb.wrappedValue = nil
+            errorMessage = error.localizedDescription
+        }
     }
 }
 
@@ -287,4 +307,5 @@ func videoThumbnail(from data: Data) async -> UIImage? {
 
 #Preview {
     ContentView()
+        .environment(AppState())
 }
