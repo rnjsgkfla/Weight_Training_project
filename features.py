@@ -21,6 +21,11 @@ from angles import (joint_angle, angle_to_vertical, select_side, compute_angles,
                     LEFT, RIGHT, SQUAT_SIDE_ANGLES)
 
 
+# '<특징>__conf' 컬럼 = 그 특징의 프레임별 판정 신뢰도(관절 visibility). 특징이 아니라
+# judge 가 신뢰도 낮은 순간을 판정에서 빼는 데만 쓴다.
+CONF_SUFFIX = '__conf'
+
+
 def _pt(x, y, i):
     """관절 i 의 (N,2) 좌표."""
     return np.stack([x[:, i], y[:, i]], axis=1)
@@ -136,7 +141,7 @@ def _role_front_is_left(diff, win=21):
     return median_filter(diff, size=win) > 0
 
 
-# ── 측면: 런지 (앞다리 무릎 깊이 + 뒷다리 무릎 + 몸통 기울기 + 위치 특징 2종) ──────
+# ── 측면: 런지 (앞다리 무릎 각도 + 뒷다리 무릎 각도 + 몸통 기울기 + 위치 특징 2종) ──────
 def extract_side_features_lunge(csv_path):
     """측면 런지 특징. 스쿼트처럼 '카메라쪽 다리 1개'를 고르는 게 아니라, 앞다리와
     뒷다리가 화면에 나란히 분리돼 보이므로 '앞다리/뒷다리' 역할로 특징을 뽑는다.
@@ -176,6 +181,18 @@ def extract_side_features_lunge(csv_path):
     feats['hip_depth'] = front_knee_y - pelvis_cy
     # 무릎 전방 이동: 앞무릎.x − 앞발끝.x. >0 이면 앞무릎이 앞발끝보다 앞.
     feats['knee_travel'] = front_knee_x - front_foot_x
+
+    # 판정 신뢰도 = 그 특징에 쓰인 관절 visibility 의 최소값. 측면에선 카메라 반대쪽 다리가
+    # 몸에 가려 MediaPipe 가 위치를 '추측'하므로(실측: 잘못 잡힌 순간 무릎 visibility 0.34~0.49),
+    # judge 가 신뢰도 낮은 순간을 판정에서 뺀다.
+    def vis(leg, *joints):
+        return np.min([v[:, leg[j]] for j in joints], axis=0)
+
+    knee_conf_L, knee_conf_R = vis(LEFT, 'hip', 'knee', 'ankle'), vis(RIGHT, 'hip', 'knee', 'ankle')
+    feats['knee' + CONF_SUFFIX] = pick(knee_conf_L, knee_conf_R)
+    feats['back_knee' + CONF_SUFFIX] = pick(knee_conf_R, knee_conf_L)
+    feats['hip_depth' + CONF_SUFFIX] = pick(vis(LEFT, 'knee'), vis(RIGHT, 'knee'))
+    feats['knee_travel' + CONF_SUFFIX] = pick(vis(LEFT, 'knee', 'foot'), vis(RIGHT, 'knee', 'foot'))
 
     return feats
 

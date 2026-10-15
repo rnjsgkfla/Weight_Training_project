@@ -1,6 +1,7 @@
 """judge_rep 이 결함 여부와 무관하게 특징별 측정값(metrics)을 돌려주는지 확인."""
 import copy
 
+import numpy as np
 import pytest
 
 from conftest import require_reference
@@ -30,6 +31,8 @@ def test_identical_rep_has_metrics_within_tolerance(side_ref):
     assert set(meta['metrics']) == expected
     for m in meta['metrics'].values():
         assert m['ratio'] == pytest.approx(0.0)
+        assert m['closeness'] == pytest.approx(0.0)
+        assert m['n'] == len(meta['path'])
 
 
 def test_high_bad_injection_is_measured_and_faulted(side_ref):
@@ -54,3 +57,26 @@ def test_low_bad_injection_uses_negative_direction(front_ref):
     assert m['dev'] == pytest.approx(-0.5, abs=1e-6)
     assert m['ratio'] > 1
     assert 'valgus' in {f['feature'] for f in faults}
+
+
+def test_low_confidence_moments_are_not_judged(side_ref):
+    # 상승 구간에 상체 숙임을 넣어도, 그 구간 신뢰도가 낮으면(가려진 관절 추측) 지적하지 않는다
+    bad = copy.deepcopy(side_ref)
+    b = bad['bottom_rel']
+    bad['features']['trunk'] = bad['features']['trunk'].copy()
+    bad['features']['trunk'][b:] += 20.0
+    conf = np.ones(bad['length'])
+    conf[b:] = 0.3
+    bad['features']['trunk__conf'] = conf
+    faults, meta = judge_rep(side_ref, bad)
+    assert 'trunk' not in {f['feature'] for f in faults}
+    assert meta['metrics']['trunk']['ratio'] < 1           # 신뢰할 수 있는 구간만으로 측정
+    assert meta['metrics']['trunk']['n'] < len(meta['path'])
+
+
+def test_feature_with_no_reliable_moment_is_skipped(side_ref):
+    rep = copy.deepcopy(side_ref)
+    rep['features']['trunk__conf'] = np.zeros(rep['length'])
+    faults, meta = judge_rep(side_ref, rep)
+    assert 'trunk' not in meta['metrics']
+    assert 'knee' in meta['metrics']

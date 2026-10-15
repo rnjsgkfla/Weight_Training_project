@@ -12,7 +12,7 @@ from test_api import FAKE_ITEM, FAKE_REPORT, FAKE_STATS, VIDEO
 def make_stats(knee_ratio, knee_fault):
     return {'score': 50 if knee_fault else 100, 'rep_count': {'side': 1},
             'reps': [{'view': 'side', 'rep': 1, 'fault_count': int(knee_fault), 'metrics': [
-                {'feature': 'knee', 'name': '무릎 깊이', 'unit': '°', 'dev': 15.0 * knee_ratio,
+                {'feature': 'knee', 'name': '무릎 각도', 'unit': '°', 'dev': 15.0 * knee_ratio,
                  'tol': 15.0, 'ratio': knee_ratio, 'fault': knee_fault},
                 {'feature': 'trunk', 'name': '상체 기울기', 'unit': '°', 'dev': 0.0,
                  'tol': 12.0, 'ratio': 0.0, 'fault': False},
@@ -42,7 +42,7 @@ def test_list_sessions(client, analyze_as):
     assert [r['id'] for r in rows] == [second, first]  # 최신순
     assert rows[1]['score'] == 75
     assert rows[1]['rep_count'] == {'side': 1}
-    assert rows[1]['top_faults'] == ['무릎 깊이']
+    assert rows[1]['top_faults'] == ['무릎 각도']
     assert rows[1]['created_at'].endswith(('Z', '+00:00'))  # UTC 명시
 
     squat_only = client.get('/sessions', params={'exercise': 'squat'}, headers=headers).json()
@@ -141,7 +141,7 @@ def test_progress(client, analyze_as):
     knee = [next(f for f in p['features'] if f['feature'] == 'knee') for p in points]
     assert [k['avg_ratio'] for k in knee] == [2.5, 0.8]
     assert [k['fault_rate'] for k in knee] == [1.0, 0.0]
-    assert knee[0]['view'] == 'side' and knee[0]['name'] == '무릎 깊이'
+    assert knee[0]['view'] == 'side' and knee[0]['name'] == '무릎 각도'
 
 
 def test_progress_unknown_exercise(client):

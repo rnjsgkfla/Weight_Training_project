@@ -18,6 +18,11 @@ judge.py — 파이프라인 8단계: 임계값 판정 + 피드백 생성
 
 import numpy as np
 from dtw import align_reps, warp_index
+from features import CONF_SUFFIX
+
+# 판정 신뢰도(관절 visibility) 하한. 사용자·모범 중 한쪽이라도 이보다 낮은 순간은 판정하지 않는다
+# (가려진 관절을 MediaPipe 가 추측한 값 — 실측: 잘못 잡힌 순간 0.34~0.49, 정상 0.9 이상).
+MIN_CONF = 0.5
 
 
 # ── 특징별 판정 규칙 (운동별) ──────────────────────────────────────────────────
@@ -174,7 +179,10 @@ def judge_rep(ref_rep, user_rep, exercise='squat', rules=None, min_len=5):
     Returns:
         faults : [{feature, message, phase, frame_start, frame_end, max_dev}, ...]
         meta   : {'path', 'norm_dist', 'user_bottom',
-                  'metrics': {feature: {'dev', 'tol', 'ratio'}}  # 결함 여부와 무관한 특징별 최악 편차}
+                  'metrics': {feature: {'dev', 'tol', 'ratio', 'closeness', 'n'}}
+                             # 결함 여부와 무관한 특징별 최악 편차 + 전 구간 평균 근접도(대응쌍 n 개)}
+        특징에 '<특징>__conf' 신뢰도가 있으면 MIN_CONF 미만인 대응쌍은 판정·metrics 에서 뺀다
+        (믿을 만한 대응쌍이 하나도 없는 특징은 그 회차에서 판정하지 않아 metrics 에도 없다).
     """
     if rules is None:
         rules = FAULT_RULES_BY_EXERCISE.get(exercise, SQUAT_FAULT_RULES)
@@ -191,10 +199,17 @@ def judge_rep(ref_rep, user_rep, exercise='squat', rules=None, min_len=5):
 
         rvals = ref_rep['features'][feat]
         uvals = user_rep['features'][feat]
+        rconf = ref_rep['features'].get(feat + CONF_SUFFIX)
+        uconf = user_rep['features'].get(feat + CONF_SUFFIX)
 
         # 정렬 경로를 따라 각 대응쌍의 결함 여부·편차 기록
         bad_flags, devs, js, irefs = [], [], [], []
         for (i, j) in path:
+            if ((rconf is not None and not rconf[i] >= MIN_CONF) or
+                    (uconf is not None and not uconf[j] >= MIN_CONF)):
+                # 신뢰도 낮은 순간: 판정하지 않는다 (편차는 NaN, 결함 구간도 여기서 끊긴다)
+                bad_flags.append(False); devs.append(np.nan); js.append(j); irefs.append(i)
+                continue
             if direction == 'asym':
                 # 특징 자체가 부호 있는 좌우 차이 → 기준값과 비교하지 않고 사용자
                 # 자신의 비대칭 크기(절대값)만으로 판정한다 (이유는 위 주석 참고 —
@@ -214,7 +229,11 @@ def judge_rep(ref_rep, user_rep, exercise='squat', rules=None, min_len=5):
 
         # 결함 여부와 무관하게 '나쁜 방향으로 가장 크게 벗어난 순간'을 기록한다
         # (히스토리·발전 추이용). ratio = 벗어난 정도 / 허용오차 → 1 초과면 허용오차 밖.
-        devs_arr = np.array(devs)
+        devs_arr = np.array(devs, dtype=float)
+        reliable = ~np.isnan(devs_arr)
+        if not reliable.any():
+            continue  # 이 회차 내내 신뢰도가 낮음 → 이 특징은 판정하지 않는다
+        devs_arr = devs_arr[reliable]
         if direction == 'high_bad':
             badness = devs_arr
         elif direction == 'low_bad':
@@ -222,8 +241,12 @@ def judge_rep(ref_rep, user_rep, exercise='squat', rules=None, min_len=5):
         else:  # two_sided, asym(이미 절대값)
             badness = np.abs(devs_arr)
         w = int(np.argmax(badness))
+        # closeness = 전 구간 평균 min(벗어난 정도 / 허용오차, 1) — 점수(scoring.py)용.
+        # 좋은 방향으로 벗어난 순간은 0 으로 친다.
         metrics[feat] = {'dev': float(devs_arr[w]), 'tol': tol,
-                         'ratio': float(badness[w] / tol)}
+                         'ratio': float(badness[w] / tol),
+                         'closeness': float(np.mean(np.clip(badness / tol, 0.0, 1.0))),
+                         'n': len(badness)}
 
         # min_len 이상 연속으로 결함인 구간 추출
         k = 0

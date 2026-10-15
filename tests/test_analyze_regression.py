@@ -21,12 +21,17 @@ def result(tmp_path_factory):
 def test_rep_count_and_score(result):
     _items, _summary, stats, _report = result
     assert stats['rep_count'] == {'side': 4, 'front': 5}
-    # 점수(scoring.py)는 측면 영상으로 계산: 얕은 스쿼트라 무릎 각도·골반 높이 오차가 허용 오차를 넘는다
-    assert stats['score'] == 12
+    # 점수(scoring.py)는 판정 결과로 계산: 지적이 있으니 79 이하, 매 회차 얕고 무릎이 모여 크게 깎인다
+    assert stats['score'] == 42
     items = {i['item']: i for i in stats['score_detail']['items']}
-    assert items['knee']['normalized_error'] == 1.0
-    assert items['pelvis']['normalized_error'] == 1.0
-    assert 0 < items['torso']['normalized_error'] < 1
+    assert set(items) == {'side.knee', 'side.hip_depth', 'side.trunk', 'side.knee_travel',
+                          'front.valgus', 'front.stance', 'front.sym_knee', 'front.sym_hip'}
+    # 지적된 항목은 80 미만, 지적 없는 항목은 80 이상 (판정과 일치)
+    faulted = {f"{r['view']}.{m['feature']}" for r in stats['reps'] for m in r['metrics'] if m['fault']}
+    for key, it in items.items():
+        assert (it['score'] < 80) == (key in faulted)
+    assert items['side.hip_depth']['score'] == 0.0     # 4회 모두, 허용오차의 3.5배
+    assert (items['front.sym_knee']['fault_reps'], items['front.sym_knee']['total_reps']) == (1, 5)
 
 
 def test_faulted_features_per_rep(result):

@@ -5,15 +5,15 @@ import api
 from conftest import signup
 
 FAKE_ITEM = {
-    'key': 'item0', 'label': '⚠️ 측면 · 1회차 · 무릎 깊이', 'detail': '...', 'ok': False,
+    'key': 'item0', 'label': '⚠️ 측면 · 1회차 · 무릎 각도', 'detail': '...', 'ok': False,
     'ref_video': 'r.mp4', 'ref_frame': 1, 'user_video': 'u.mp4', 'user_frame': 1,
-    'view': '측면', 'rep': 1, 'feature_name': '무릎 깊이', 'phase': '최저', 'time_sec': 1.0,
+    'view': '측면', 'rep': 1, 'feature_name': '무릎 각도', 'phase': '최저', 'time_sec': 1.0,
     'ref_val': 90.0, 'user_val': 120.0, 'dev': 30.0, 'unit': '°', 'message': '더 앉으세요',
 }
 FAKE_STATS = {
     'score': 75, 'rep_count': {'side': 1},
     'reps': [{'view': 'side', 'rep': 1, 'fault_count': 1, 'metrics': [
-        {'feature': 'knee', 'name': '무릎 깊이', 'unit': '°', 'dev': 30.0, 'tol': 15.0,
+        {'feature': 'knee', 'name': '무릎 각도', 'unit': '°', 'dev': 30.0, 'tol': 15.0,
          'ratio': 2.0, 'fault': True},
         {'feature': 'trunk', 'name': '상체 기울기', 'unit': '°', 'dev': -3.0, 'tol': 12.0,
          'ratio': -0.25, 'fault': False},
@@ -23,7 +23,7 @@ FAKE_STATS = {
 }
 FRAME = {'video': 'v.mp4', 'frame': 1, 'landmarks': 'lm.csv', 'joints': [25], 'color': (0, 0, 255)}
 FAKE_ISSUE = {
-    'key': 'side.knee', 'view': 'side', 'view_kr': '측면', 'feature': 'knee', 'name': '무릎 깊이',
+    'key': 'side.knee', 'view': 'side', 'view_kr': '측면', 'feature': 'knee', 'name': '무릎 각도',
     'unit': '°', 'headline': '무릎을 더 굽혀 깊이 앉으세요', 'advice': None, 'reps': [1],
     'total_reps': 1, 'severity': 2.0, 'rep': 1, 'phase': '최저', 'time_sec': 1.0,
     'ref_val': 90.0, 'user_val': 120.0, 'thumb': {'ref': FRAME, 'user': FRAME},
@@ -54,7 +54,7 @@ def test_analyze_without_login_is_not_saved(client):
     body = res.json()
     assert body['stats'] == FAKE_STATS
     assert body['session_id'] is None
-    assert body['items'][0]['feature_name'] == '무릎 깊이'
+    assert body['items'][0]['feature_name'] == '무릎 각도'
     assert body['items'][0]['ref_image'].startswith('data:image/jpeg;base64,')
 
 

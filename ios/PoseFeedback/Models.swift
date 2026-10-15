@@ -143,30 +143,32 @@ struct SessionStats: Codable {
     }
 }
 
-/// 점수 = 100 × (1 − Σ 가중치 × 정규화 오차)
+/// 점수 = Σ 가중치 × 항목 점수. 80 이상 = 지적 없음, 79 이하 = 지적 있음
 struct ScoreDetail: Codable {
-    let combinedError: Double
     let items: [ScoreItem]
-
-    enum CodingKeys: String, CodingKey {
-        case items
-        case combinedError = "combined_error"
-    }
 }
 
 struct ScoreItem: Codable {
     let item: String
     let name: String
     let weight: Double
+    /// 측면 / 정면
+    let viewKr: String?
+    /// 항목 점수: 지적 없음 80~100, 지적 있음 0~79
+    let score: Double?
+    let faultReps: Int?
+    let totalReps: Int?
+    // 구버전 기록(DTW 평균 오차 방식)에만 있는 필드
     let unit: String?
-    let tolerance: Double
-    /// DTW 대응쌍 평균 절대 오차 D
-    let meanError: Double
-    /// e = min(D / T, 1)
-    let normalizedError: Double
+    let tolerance: Double?
+    let meanError: Double?
+    let normalizedError: Double?
 
     enum CodingKeys: String, CodingKey {
-        case item, name, weight, unit, tolerance
+        case item, name, weight, score, unit, tolerance
+        case viewKr = "view_kr"
+        case faultReps = "fault_reps"
+        case totalReps = "total_reps"
         case meanError = "mean_error"
         case normalizedError = "normalized_error"
     }

@@ -20,7 +20,7 @@ class FeedbackItem(BaseModel):
     # 구조화 필드 (앱 비교 화면용, 양호 항목은 수치가 없어 null 일 수 있음)
     view: str | None = None          # 측면 / 정면
     rep: int | None = None           # 회차
-    feature_name: str | None = None  # 결함 이름 (예: 무릎 깊이)
+    feature_name: str | None = None  # 결함 이름 (예: 무릎 각도)
     phase: str | None = None         # 하강 / 최저 / 상승
     time_sec: float | None = None    # 결함 시각(초)
     ref_val: float | None = None     # 모범 값
@@ -32,7 +32,7 @@ class FeedbackItem(BaseModel):
 
 class RepMetric(BaseModel):
     feature: str        # 특징 식별자 (예: knee)
-    name: str           # 한글 이름 (예: 무릎 깊이)
+    name: str           # 한글 이름 (예: 무릎 각도)
     unit: str           # 단위 (° 또는 빈 문자열)
     dev: float          # 가장 나빴던 순간의 편차 (내 − 모범, asym 은 절대값)
     tol: float          # 허용오차
@@ -48,22 +48,31 @@ class RepStats(BaseModel):
 
 
 class ScoreItem(BaseModel):
-    item: str               # 점수 항목 식별자 (예: knee, pelvis)
+    item: str               # 점수 항목 식별자 (예: side.knee — 문제 카드 key 와 같음)
     name: str               # 한글 이름 (예: 무릎 각도)
-    weight: float           # 가중치 (운동별 합 1.00)
-    unit: str = ''          # ° (각도) 또는 빈 문자열 (위치, 상체 길이=1 단위)
-    tolerance: float        # 허용 오차 T (°, 또는 상체 길이=1 단위)
-    mean_error: float       # DTW 대응쌍 평균 절대 오차 D
-    normalized_error: float # e = min(D / T, 1)
+    weight: float           # 가중치 (분석한 항목끼리 합 1.00)
+    view: str | None = None         # side / front
+    view_kr: str | None = None      # 측면 / 정면
+    feature: str | None = None      # 특징 식별자 (예: knee)
+    score: float | None = None      # 항목 점수: 지적 없음 80~100, 지적 있음 0~79
+    fault_reps: int | None = None   # 이 항목이 지적된 회차 수
+    total_reps: int | None = None   # 이 항목을 판정한 회차 수
+    severity: float | None = None   # 가장 심했던 순간의 벗어난 정도 / 허용오차 (지적 없으면 null)
+    closeness: float | None = None  # 전 구간 평균 min(벗어난 정도 / 허용오차, 1)
+    # 구버전 기록(DTW 평균 오차 방식)에만 있는 필드
+    unit: str = ''
+    tolerance: float | None = None
+    mean_error: float | None = None
+    normalized_error: float | None = None
 
 
 class ScoreDetail(BaseModel):
-    combined_error: float   # E = Σ weight × e
     items: list[ScoreItem]
+    combined_error: float | None = None  # 구버전 기록에만 있음
 
 
 class SessionStats(BaseModel):
-    score: int | None           # 0~100 = 100 × (1 − E). 점수용 방향 영상이 없으면 null
+    score: int | None           # 0~100. 80 이상 = 지적 없음, 79 이하 = 지적 있음. 회차가 없으면 null
     score_detail: ScoreDetail | None = None
     rep_count: dict[str, int]   # {view: 반복 수}
     reps: list[RepStats]
@@ -82,7 +91,7 @@ class Issue(BaseModel):
     view: str                   # side / front
     view_kr: str
     feature: str
-    name: str                   # 항목 이름 (예: 무릎 깊이)
+    name: str                   # 항목 이름 (예: 무릎 각도)
     unit: str                   # ° 또는 빈 문자열
     headline: str               # 문제 설명 (예: 오른쪽 팔꿈치를 기준보다 많이 굽혔습니다)
     advice: str | None          # 할 일 (예: 조금 더 펴보세요)

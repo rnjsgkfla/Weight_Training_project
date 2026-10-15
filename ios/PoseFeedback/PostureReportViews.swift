@@ -73,26 +73,87 @@ struct ScoreCard: View {
                 }
             }
             if points.count >= 2 {
-                // 최근 10회 점수 미니 그래프
-                let recent = Array(points.suffix(10).enumerated())
-                Chart(recent, id: \.offset) { i, p in
-                    if let s = p.score {
-                        AreaMark(x: .value("기록", i), y: .value("점수", s))
-                            .foregroundStyle(Color.brand.opacity(0.15))
-                        LineMark(x: .value("기록", i), y: .value("점수", s))
-                            .foregroundStyle(Color.brand)
-                        PointMark(x: .value("기록", i), y: .value("점수", s))
-                            .foregroundStyle(Color.brand).symbolSize(20)
-                    }
-                }
-                .chartYScale(domain: 0...100)
-                .chartXAxis(.hidden)
-                .chartYAxis(.hidden)
-                .frame(height: 56)
+                // 최근 10회 점수 그래프 (회차는 전체 기록 기준)
+                let recent = Array(points.suffix(10))
+                ScoreTrendChart(points: recent, firstRound: points.count - recent.count + 1, area: true)
                 Text("최근 \(recent.count)회 점수 변화").font(.caption2).foregroundStyle(.secondary)
             }
         }
         .reportCard()
+    }
+}
+
+// MARK: - 점수 추이 그래프 (y축 점수, x축 회차 · 기록 날짜)
+
+struct ScoreTrendChart: View {
+    let points: [ProgressPoint]
+    /// points[0] 의 회차 (전체 기록에서 몇 번째인지, 1부터)
+    var firstRound = 1
+    var area = false
+    var height: CGFloat = 170
+
+    private var lastRound: Int { firstRound + points.count - 1 }
+    /// x축 범위: 기록이 1개여도 축이 그려지게 최소 2칸
+    private var xDomain: ClosedRange<Int> { firstRound...max(lastRound, firstRound + 1) }
+    /// x축 눈금: 날짜까지 두 줄이라 5개 안팎만 (마지막 회차는 항상 포함)
+    private var xTicks: [Int] {
+        let step = max(1, (points.count + 4) / 5)
+        var ticks = Array(stride(from: firstRound, through: lastRound, by: step))
+        if ticks.last != lastRound { ticks.append(lastRound) }
+        return ticks
+    }
+
+    var body: some View {
+        Chart {
+            ForEach(Array(points.enumerated()), id: \.offset) { i, p in
+                if let s = p.score {
+                    if area {
+                        AreaMark(x: .value("회차", firstRound + i), y: .value("점수", s))
+                            .foregroundStyle(Color.brand.opacity(0.15))
+                    }
+                    LineMark(x: .value("회차", firstRound + i), y: .value("점수", s))
+                        .foregroundStyle(Color.brand)
+                    PointMark(x: .value("회차", firstRound + i), y: .value("점수", s))
+                        .foregroundStyle(Color.brand).symbolSize(30)
+                }
+            }
+            // 80점 이상 = 모든 회차 지적 없음 (scoring.py)
+            RuleMark(y: .value("양호 기준", 80))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .foregroundStyle(.green.opacity(0.6))
+                .annotation(position: .top, alignment: .trailing) {
+                    Text("양호 80점").font(.caption2).foregroundStyle(.green)
+                }
+        }
+        .chartYScale(domain: 0...100)
+        .chartXScale(domain: xDomain, range: .plotDimension(padding: 24))
+        .chartYAxis {
+            AxisMarks(position: .leading, values: [0, 20, 40, 60, 80, 100]) { value in
+                AxisGridLine()
+                AxisValueLabel { if let s = value.as(Int.self) { Text("\(s)점") } }
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: xTicks) { value in  // 라벨을 눈금 가운데 정렬 (왼쪽 정렬이면 마지막 라벨이 잘림)
+                AxisGridLine(); AxisTick()
+                AxisValueLabel(anchor: .top) {
+                    if let round = value.as(Int.self) {
+                        Text("\(round)회\n\(dateLabel(round))").multilineTextAlignment(.center)
+                    }
+                }
+            }
+        }
+        .chartYAxisLabel(position: .top, alignment: .leading) { Text("점수") }
+        .chartXAxisLabel(position: .bottom, alignment: .center) { Text("회차 · 기록 날짜") }
+        .frame(height: height)
+    }
+
+    /// 회차 → 기록 날짜 "10/15"
+    private func dateLabel(_ round: Int) -> String {
+        let i = round - firstRound
+        guard points.indices.contains(i) else { return "" }
+        let d = Calendar.current.dateComponents([.month, .day], from: points[i].createdAt)
+        return "\(d.month ?? 0)/\(d.day ?? 0)"
     }
 }
 

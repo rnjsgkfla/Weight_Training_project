@@ -94,7 +94,10 @@ struct ScoreSections: View {
                     // 계산 내역은 접어 둬서 문제 카드가 먼저 보이게 한다
                     DisclosureGroup("점수 계산 내역") {
                         ForEach(detail.items, id: \.item) { ScoreItemRow(item: $0) }
-                        Text("모범 동작과 같은 순간끼리 비교한 평균 오차를 항목별 허용 오차로 나눠 가중 합산했어요. 막대가 짧을수록 모범에 가까워요.")
+                        Text(detail.items.first?.score != nil
+                             ? "지적이 없는 항목은 80~100점(모범에 가까울수록 높음), 지적된 항목은 79점 이하(자주·크게 벗어날수록 낮음)예요. 항목 점수를 가중 합산하고, 지적이 하나라도 있으면 총점은 79점을 넘지 않아요."
+                               + (response.exercise == "lunge" ? " 런지는 측면 항목을 80% 반영하고, 지적된 항목일수록 비중을 키워 계산해요." : "")
+                             : "모범 동작과 같은 순간끼리 비교한 평균 오차를 항목별 허용 오차로 나눠 가중 합산했어요. 막대가 짧을수록 모범에 가까워요.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     .font(.subheadline)
@@ -136,28 +139,43 @@ struct RepGroupSections: View {
     }
 }
 
-// MARK: - 점수 항목 행 (평균 오차 / 허용 오차 막대)
+// MARK: - 점수 항목 행 (항목 점수 막대, 구버전 기록은 평균 오차 / 허용 오차 막대)
 
 struct ScoreItemRow: View {
     let item: ScoreItem
 
-    private var unit: String { item.unit ?? "" }
-    private var format: String { unit.isEmpty ? "%.2f" : "%.1f" }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(item.name).font(.subheadline)
+                Text(item.viewKr.map { "\($0) · \(item.name)" } ?? item.name).font(.subheadline)
                 Text("\(Int((item.weight * 100).rounded()))%")
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
-                Text("평균 오차 \(String(format: format, item.meanError))\(unit) / 허용 \(String(format: format, item.tolerance))\(unit)")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(caption).font(.caption).foregroundStyle(.secondary)
             }
-            ProgressView(value: item.normalizedError)
-                .tint(item.normalizedError < 0.34 ? .green : item.normalizedError < 0.67 ? .orange : .red)
+            if let score = item.score {
+                ProgressView(value: score, total: 100)
+                    .tint(ScoreBadge.color(Int(score.rounded())))
+            } else if let e = item.normalizedError {
+                ProgressView(value: e)
+                    .tint(e < 0.34 ? .green : e < 0.67 ? .orange : .red)
+            }
         }
         .padding(.vertical, 2)
+    }
+
+    private var caption: String {
+        if let score = item.score {
+            let status = (item.faultReps ?? 0) > 0
+                ? "\(item.totalReps ?? 0)회 중 \(item.faultReps ?? 0)회 지적"
+                : "양호"
+            return "\(status) · \(Int(score.rounded()))점"
+        }
+        // 구버전 기록
+        let unit = item.unit ?? ""
+        let format = unit.isEmpty ? "%.2f" : "%.1f"
+        guard let mean = item.meanError, let tol = item.tolerance else { return "" }
+        return "평균 오차 \(String(format: format, mean))\(unit) / 허용 \(String(format: format, tol))\(unit)"
     }
 }
 

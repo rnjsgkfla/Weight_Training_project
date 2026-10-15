@@ -27,7 +27,7 @@ from normalize_landmarks import normalize_csv
 from features import extract_and_save
 from rep_features import slice_reps
 from judge import judge_rep, format_feedback, PHASE_LABELS
-from scoring import SCORE_FUNCTIONS, SCORE_VIEW
+from scoring import session_score
 from issues import build_issues, good_points
 
 # 기준(템플릿) 영상의 특징/스무딩 CSV — 운동·뷰별 1 rep
@@ -73,7 +73,7 @@ NEUTRAL_LEG_LABEL = {'lateral_raise': '정면(양팔)', 'lunge': '앞다리 자�
 
 # 특징 → 한글 짧은 이름 / 단위 (UI 표시용)
 FEATURE_KR = {
-    'knee': '무릎 깊이', 'hip': '고관절 깊이', 'hip_depth': '엉덩이 깊이',
+    'knee': '무릎 각도', 'hip': '고관절 각도', 'hip_depth': '엉덩이 깊이',
     'trunk': '상체 기울기', 'shin': '정강이 각도', 'knee_travel': '무릎 전방이동',
     'valgus': '무릎 모임', 'stance': '스탠스 너비',
     'sym_knee': '좌우 무릎 대칭', 'sym_hip': '골반 수평',
@@ -81,8 +81,10 @@ FEATURE_KR = {
     'elbow_L': '왼쪽 팔꿈치 각도', 'elbow_R': '오른쪽 팔꿈치 각도',
     'wrist_L': '왼쪽 손목 높이', 'wrist_R': '오른쪽 손목 높이',
     'shoulder_height_diff': '좌우 어깨 높이차',
-    'back_knee': '뒷다리 무릎 깊이',
+    'back_knee': '뒷무릎 각도',
 }
+# 운동별로 다르게 부를 이름 (런지의 knee 는 앞다리 무릎)
+FEATURE_KR_BY_EXERCISE = {'lunge': {'knee': '앞무릎 각도'}}
 FEATURE_UNIT = {'knee': '°', 'hip': '°', 'trunk': '°', 'shin': '°', 'sym_knee': '°',
                 'arm_L': '°', 'arm_R': '°', 'elbow_L': '°', 'elbow_R': '°',
                 'back_knee': '°'}
@@ -223,10 +225,10 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
       ok          : 결함 없이 '양호'한 항목이면 True
 
     stats (히스토리·발전 추이 저장용):
-      score     : 0~100 자세 점수 (scoring.py: DTW 특징별 평균 오차 → 정규화 → 가중합).
-                  점수용 방향(스쿼트·런지=측면, 사레레=정면) 영상이 없거나 반복이 없으면 None
-      score_detail : 점수 계산 내역 {combined_error, items: [{item, name, weight, tolerance,
-                     mean_error, normalized_error}]} (score 가 None 이면 None)
+      score     : 0~100 자세 점수 (scoring.py: 판정 결과 → 항목별 점수 → 가중합).
+                  80 이상 = 모든 회차 지적 없음, 79 이하 = 지적 있음. 분석한 회차가 없으면 None
+      score_detail : 점수 계산 내역 {items: [{item, view, view_kr, feature, name, weight, score,
+                     fault_reps, total_reps, severity, closeness}]} (score 가 None 이면 None)
       rep_count : {view: 반복 수}  (view 는 'side' / 'front')
       warnings  : 분석하지 못한 뷰의 안내 문구 목록 (예: "측면: 몸이 화면에 다 나오지 않았어요…")
       reps      : [{view, rep, fault_count, metrics: [{feature, name, unit, dev, tol,
@@ -243,12 +245,13 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
     Returns:
       (items, summary_md, stats, report)
     """
+    names = {**FEATURE_KR, **FEATURE_KR_BY_EXERCISE.get(exercise, {})}
     items = []
     summary = []
     rejected = []   # 분석할 수 없었던 뷰의 안내 문구 ("정면: 사람을 찾지 못했어요…")
     stats_reps = []
     rep_count = {}
-    score_aligned = []  # 점수용 (모범 반복, 사용자 반복, DTW 경로) 목록
+    score_reps = []     # 점수용 회차별 판정 결과 {view, faults, metrics}
     fault_log = []      # 문제 카드용 결함 기록
     view_ctx = {}       # 뷰별 영상·랜드마크 경로 (비교 프레임용)
     videos = {'side': side_video, 'front': front_video}
@@ -278,15 +281,14 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
         n_fault = 0
         for k, rep in enumerate(user_reps, 1):
             faults, meta = judge_rep(ref_rep, rep, exercise=exercise)
-            if view == SCORE_VIEW[exercise]:
-                score_aligned.append((ref_rep, rep, meta['path']))
+            score_reps.append({'view': view, 'faults': faults, 'metrics': meta['metrics']})
             fault_log += [{'view': view, 'rep': k, 'fault': f, 'ref_rep': ref_rep,
                            'user_rep': rep, 'path': meta['path']} for f in faults]
             fault_feats = {f['feature'] for f in faults}
             stats_reps.append({
                 'view': view, 'rep': k, 'fault_count': len(faults),
                 'metrics': [
-                    {'feature': feat, 'name': FEATURE_KR.get(feat, feat),
+                    {'feature': feat, 'name': names.get(feat, feat),
                      'unit': FEATURE_UNIT.get(feat, ''),
                      'dev': round(m['dev'], 3), 'tol': m['tol'],
                      'ratio': round(m['ratio'], 2), 'fault': feat in fault_feats}
@@ -311,7 +313,7 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
                 continue
             for f in faults:
                 n_fault += 1
-                name = FEATURE_KR.get(f['feature'], f['feature'])
+                name = names.get(f['feature'], f['feature'])
                 unit = FEATURE_UNIT.get(f['feature'], '')
                 t = (f['user_frame'] - 1) / fps
                 detail = (
@@ -343,12 +345,13 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
                           'ref_landmarks': REFERENCE[exercise][view][1],
                           'user_landmarks': os.path.join(workdir, f"{exercise}_{view}_smoothed.csv")}
 
-    # 점수: 점수용 방향 영상의 모든 회차 DTW 대응쌍으로 계산 (scoring.py)
-    score_detail = SCORE_FUNCTIONS[exercise](score_aligned) if score_aligned else None
+    # 점수: 화면의 판정(양호/지적)과 같은 결과로 계산 (scoring.py)
+    score_detail = session_score(exercise, score_reps, names) if score_reps else None
     score = round(score_detail['score']) if score_detail else None
-    if score is None and stats_reps:
-        view_kr = '측면' if SCORE_VIEW[exercise] == 'side' else '정면'
-        rejected.append(f"점수: {view_kr} 영상이 있어야 점수를 계산할 수 있어요. 피드백은 그대로 확인할 수 있어요.")
+    missing = [v for v in REFERENCE[exercise] if v not in rep_count]
+    if score is not None and missing:
+        missing_kr = '·'.join('측면' if v == 'side' else '정면' for v in missing)
+        rejected.append(f"점수: {missing_kr} 영상이 없어 그 방향 항목은 빼고 계산했어요.")
     stats = {'score': score, 'score_detail': score_detail, 'rep_count': rep_count,
              'reps': stats_reps, 'warnings': rejected}
 
@@ -367,8 +370,8 @@ def analyze_for_ui(exercise='squat', side_video=None, front_video=None, workdir=
             # 영상은 처리했으나 반복(또는 사람)을 인식 못 함
             summary_md = ("⚠️ 사람 또는 반복 동작을 인식하지 못했어요.\n\n"
                           "전신이 화면에 다 나오게, 운동을 1회 이상 수행한 영상을 올려주세요.")
-    report = {'issues': build_issues(exercise, fault_log, view_ctx, FEATURE_KR, FEATURE_UNIT),
-              'good_points': good_points(stats_reps, FEATURE_KR)}
+    report = {'issues': build_issues(exercise, fault_log, view_ctx, names, FEATURE_UNIT),
+              'good_points': good_points(stats_reps, names)}
     return items, summary_md, stats, report
 
 

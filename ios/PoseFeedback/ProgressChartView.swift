@@ -97,25 +97,8 @@ struct ProgressChartView: View {
 
     private var scoreSection: some View {
         Section("점수") {
-            Chart(Array(points.enumerated()), id: \.offset) { i, p in
-                if let score = p.score {
-                    LineMark(x: .value("기록", i + 1), y: .value("점수", score))
-                        .foregroundStyle(Color.brand)
-                    PointMark(x: .value("기록", i + 1), y: .value("점수", score))
-                        .foregroundStyle(Color.brand)
-                }
-            }
-            .chartYScale(domain: 0...100)
-            .chartXScale(domain: xDomain, range: .plotDimension(padding: 16))
-            .chartXAxis {
-                AxisMarks(values: xTicks) {  // 라벨을 눈금 가운데 정렬 (왼쪽 정렬이면 마지막 라벨이 잘려 사라짐)
-                    AxisGridLine(); AxisTick(); AxisValueLabel(anchor: .top)
-                }
-            }
-            .chartYAxis { AxisMarks(position: .leading) }  // 오른쪽 끝 x 눈금과 겹치지 않게
-            .chartXAxisLabel("기록 순서")
-            .frame(height: 180)
-            .padding(.vertical, 8)
+            ScoreTrendChart(points: points, height: 200)
+                .padding(.vertical, 8)
         }
     }
 

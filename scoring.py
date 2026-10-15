@@ -1,134 +1,122 @@
 """
-scoring.py — DTW 정렬 결과로 운동 자세 점수(0~100)를 계산한다.
+scoring.py — 판정(judge.py) 결과로 운동 자세 점수(0~100)를 계산한다.
 
-계산 순서 (모든 운동 공통):
-  1. DTW 대응쌍마다 특징별 절대 오차   d_{i,t} = |expert_{i,t} − user_{i,t}|
-  2. 특징별 전체 평균 오차              D_i = (1/T) Σ_t d_{i,t}
-     (여러 회차면 모든 회차의 대응쌍을 합쳐 한 번에 평균낸다)
-  3. 허용 오차로 정규화                 e_i = min(D_i / T_i, 1)
-     (좌우 특징은 좌우 평균 오차를 먼저 구한 뒤 정규화)
-  4. 가중합                             E = Σ w_i e_i
-  5. 점수                               Score = clamp(100 (1 − E), 0, 100)
+점수는 화면의 '양호 / 고칠 점' 판정과 같은 규칙(특징별 나쁜 방향·허용오차·최소 지속 길이)에서
+나온다. 그래서 점수와 판정이 어긋나지 않는다:
+  80~100 : 모든 회차에서 지적 없음. 허용오차에서 멀수록(모범에 가까울수록) 100 에 가깝다.
+  0~79   : 지적된 항목이 있음. 자주·크게 벗어날수록 낮다.
 
-'프레임별 종합 점수 → 평균' 방식은 쓰지 않는다. 특징별 평균 오차를 먼저 구한다.
+항목(뷰·특징 = 문제 카드 하나)별 점수 S_f:
+  b_t = 그 순간 '나쁜 방향'으로 벗어난 정도 / 허용오차  (judge 와 같은 정의, 좋은 방향은 0)
+  지적 없음 : S_f = 100 − 20 · m_f
+              m_f = 모든 회차 대응쌍의 평균 min(b_t, 1)  (judge metrics 의 closeness)
+  지적 있음 : S_f = 79 · (1 − p_f)
+              p_f = ½ · (지적된 회차 / 전체 회차) + ½ · min((심각도 − 1) / 2, 1)
+              심각도 = 결함 구간에서 가장 크게 벗어난 정도 / 허용오차 (문제 카드 severity 와 같음)
+총점 = Σ w_f S_f   (분석한 뷰의 항목만 쓰고, 가중치는 합이 1 이 되게 다시 나눈다)
+       지적이 하나라도 있으면 79 를 넘지 않는다.
+       FAULT_EMPHASIS 가 있는 운동(런지)은 w_f 대신 w_f · (1 + k · p_f) 를 쓴다
+       → 자주·크게 지적된 항목일수록 비중이 커져, 지적 없는 항목이 감점을 메우지 못한다.
+         (지적이 없으면 p_f = 0 이라 영향 없음)
 
-입력 aligned: [(expert_rep, user_rep, path), ...]
-  expert_rep / user_rep : rep_features.slice_reps 의 반복 dict ('features' 에 특징 시계열)
-  path                  : dtw.align_reps 의 정렬 경로 [(expert_idx, user_idx), ...]
-
-점수 항목은 스쿼트·런지는 측면, 사이드 레터럴 레이즈는 정면 영상에서 계산한다 (SCORE_VIEW).
+입력 rep_results: 회차마다 {'view', 'faults', 'metrics'}  (judge_rep 의 faults, meta['metrics'])
 """
 
-import numpy as np
-
-# 운동별 점수 계산에 쓰는 영상 방향
-SCORE_VIEW = {'squat': 'side', 'lunge': 'side', 'lateral_raise': 'front'}
-
-# 점수 항목 → 사용할 특징 이름 (여러 개면 좌우 평균 오차)
-SCORE_ITEM_FEATURES = {
+# 운동별 항목 가중치 (뷰.특징 → 가중치, 운동별 합 1.00). 키는 judge 규칙의 특징과 같다.
+SCORE_WEIGHTS = {
     'squat': {
-        'knee':   ['knee'],          # 무릎 각도 (골반–무릎–발목)
-        'pelvis': ['hip_depth'],     # 골반 높이 (무릎 높이 − 골반 높이)
-        'torso':  ['trunk'],         # 상체 기울기
+        'side.knee': 0.20, 'side.hip_depth': 0.20, 'side.trunk': 0.15, 'side.knee_travel': 0.10,
+        'front.valgus': 0.15, 'front.stance': 0.05, 'front.sym_knee': 0.08, 'front.sym_hip': 0.07,
     },
+    # 런지는 핵심 실수(깊이·상체 숙임·뒷무릎)가 측면에서만 보여 측면 80% / 정면 20%
     'lunge': {
-        'front_knee': ['knee'],      # 앞쪽 무릎 각도
-        'rear_knee':  ['back_knee'], # 뒤쪽 무릎 각도
-        'pelvis':     ['hip_depth'], # 골반 높이 (앞무릎 높이 − 골반 중심 높이)
-        'torso':      ['trunk'],     # 상체 기울기
+        'side.knee': 0.22, 'side.back_knee': 0.15, 'side.hip_depth': 0.18, 'side.trunk': 0.13,
+        'side.knee_travel': 0.12,
+        'front.trunk': 0.03, 'front.valgus': 0.10, 'front.sym_hip': 0.07,
     },
     'lateral_raise': {
-        'shoulder': ['shoulder_L', 'shoulder_R'],  # 어깨 각도 (골반–어깨–팔꿈치)
-        'elbow':    ['elbow_L', 'elbow_R'],        # 팔꿈치 각도
-        'wrist':    ['wrist_L', 'wrist_R'],        # 손목 높이
-        'torso':    ['trunk'],                     # 상체 기울기
+        'front.arm_L': 0.15, 'front.arm_R': 0.15, 'front.elbow_L': 0.08, 'front.elbow_R': 0.08,
+        'front.wrist_L': 0.12, 'front.wrist_R': 0.12, 'front.trunk': 0.15,
+        'front.shoulder_height_diff': 0.15,
     },
 }
 
-# 운동별 가중치 (합 1.00)
-SCORE_WEIGHTS = {
-    'squat':         {'knee': 0.40, 'pelvis': 0.35, 'torso': 0.25},
-    'lunge':         {'front_knee': 0.35, 'rear_knee': 0.20, 'pelvis': 0.25, 'torso': 0.20},
-    'lateral_raise': {'shoulder': 0.35, 'elbow': 0.20, 'wrist': 0.30, 'torso': 0.15},
-}
+OK_FLOOR = 80        # 지적 없는 항목·총점의 최저점
+FAULT_CEIL = 79      # 지적 있는 항목·총점의 최고점
+SEVERITY_SPAN = 2.0  # 심각도가 1 + 이 값(허용오차의 3배) 이상이면 심각도 감점 최대
 
-# 운동별 허용 오차 T_i (각도: °, 위치: 상체 길이=1 단위). 평균 오차가 이만큼이면 그 항목은 0점.
-# 지금은 judge.py 결함 판정 허용오차와 같은 값으로 시작한다 (라벨 데이터로 보정 예정).
-SCORE_TOLERANCES = {
-    'squat':         {'knee': 15.0, 'pelvis': 0.15, 'torso': 12.0},
-    'lunge':         {'front_knee': 25.0, 'rear_knee': 20.0, 'pelvis': 0.45, 'torso': 12.0},
-    'lateral_raise': {'shoulder': 15.0, 'elbow': 15.0, 'wrist': 0.15, 'torso': 10.0},
-}
+# 지적 항목 비중 확대 k (운동별). 가장 심한 항목(p_f = 1)은 가중치가 1 + k 배가 된다.
+FAULT_EMPHASIS = {'lunge': 2.0}
 
-# 각도 항목의 단위 (그 외 위치 항목은 상체 길이=1 단위라 단위 표기 없음)
-ANGLE_ITEMS = {'knee', 'front_knee', 'rear_knee', 'torso', 'shoulder', 'elbow'}
-
-# 화면 표시용 항목 이름
-SCORE_ITEM_KR = {
-    'knee': '무릎 각도', 'front_knee': '앞쪽 무릎 각도', 'rear_knee': '뒤쪽 무릎 각도',
-    'pelvis': '골반 높이', 'torso': '상체 기울기',
-    'shoulder': '어깨 각도', 'elbow': '팔꿈치 각도', 'wrist': '손목 높이',
-}
+VIEW_KR = {'side': '측면', 'front': '정면'}
 
 
-# ── 공통 계산 ──────────────────────────────────────────────────────────────────
-def mean_abs_error(aligned, feature):
-    """특징 하나의 DTW 전체 평균 절대 오차 D = (1/T) Σ |expert − user|.
-
-    모든 회차의 대응쌍을 합쳐 평균낸다(회차별 평균을 다시 평균내지 않음).
-    """
-    abs_errors = []
-    for expert_rep, user_rep, path in aligned:
-        expert_values = expert_rep['features'][feature]
-        user_values = user_rep['features'][feature]
-        abs_errors.extend(abs(expert_values[i] - user_values[j]) for i, j in path)
-    return float(np.mean(abs_errors))
+def fault_penalty(fault_reps, total_reps, severity):
+    """p_f (0~1): 지적된 회차 비율과 심각도를 반씩. 지적이 없으면 0."""
+    if fault_reps == 0:
+        return 0.0
+    return 0.5 * fault_reps / total_reps + 0.5 * min((severity - 1.0) / SEVERITY_SPAN, 1.0)
 
 
-def normalized_error(mean_error, tolerance):
-    """e = min(D / T, 1)  — 0(모범과 같음) ~ 1(허용 오차 이상)."""
-    return min(mean_error / tolerance, 1.0)
+def item_score(closeness, fault_reps, total_reps, severity):
+    """항목 하나의 점수 S_f (0~100). 지적 없으면 80~100, 있으면 0~79."""
+    if fault_reps == 0:
+        return 100.0 - (100.0 - OK_FLOOR) * closeness
+    return FAULT_CEIL * (1.0 - fault_penalty(fault_reps, total_reps, severity))
 
 
-def weighted_score(aligned, item_features, weights, tolerances):
-    """항목별 평균 오차 → 정규화 → 가중합 → 0~100 점수.
+def session_score(exercise, rep_results, names=None):
+    """모든 회차 판정 결과 → 총점과 항목별 내역.
 
+    Args:
+        rep_results : [{'view', 'faults', 'metrics'}]  (회차마다 judge_rep 결과)
+        names       : 특징 → 한글 이름 (없으면 특징 식별자를 그대로 쓴다)
     Returns:
-        {'score': 0~100 실수, 'combined_error': E,
-         'items': [{item, name, weight, tolerance, mean_error, normalized_error}, ...]}
+        None (채점할 항목이 없을 때) 또는
+        {'score': 0~100 실수,
+         'items': [{item, view, view_kr, feature, name, weight, score,
+                    fault_reps, total_reps, severity, closeness}, ...]}
+        weight 는 실제 계산에 쓴 비중(지적 항목 비중 확대 포함, 합 1)이다.
     """
-    items = []
-    combined_error = 0.0
-    for item, features in item_features.items():
-        # 좌우 특징은 좌우 평균 오차를 먼저 구한 뒤 정규화한다
-        mean_error = float(np.mean([mean_abs_error(aligned, f) for f in features]))
-        e = normalized_error(mean_error, tolerances[item])
-        combined_error += weights[item] * e
-        items.append({'item': item, 'name': SCORE_ITEM_KR[item], 'weight': weights[item],
-                      'unit': '°' if item in ANGLE_ITEMS else '',
-                      'tolerance': tolerances[item], 'mean_error': round(mean_error, 4),
-                      'normalized_error': round(e, 4)})
-    score = min(max(100.0 * (1.0 - combined_error), 0.0), 100.0)
-    return {'score': score, 'combined_error': round(combined_error, 4), 'items': items}
+    names = names or {}
+    acc = {}
+    for r in rep_results:
+        fault_sev = {}  # 이 회차에서 지적된 특징 → 가장 심했던 정도
+        for f in r['faults']:
+            sev = abs(f['max_dev']) / r['metrics'][f['feature']]['tol']
+            fault_sev[f['feature']] = max(fault_sev.get(f['feature'], 0.0), sev)
+        for feat, m in r['metrics'].items():
+            a = acc.setdefault(f"{r['view']}.{feat}", {'close_sum': 0.0, 'n': 0, 'reps': 0,
+                                                       'fault_reps': 0, 'severity': None})
+            a['close_sum'] += m['closeness'] * m['n']
+            a['n'] += m['n']
+            a['reps'] += 1
+            if feat in fault_sev:
+                a['fault_reps'] += 1
+                a['severity'] = max(a['severity'] or 0.0, fault_sev[feat])
 
+    emphasis = FAULT_EMPHASIS.get(exercise, 0.0)
+    weights = {k: w * (1.0 + emphasis * fault_penalty(acc[k]['fault_reps'], acc[k]['reps'],
+                                                      acc[k]['severity']))
+               for k, w in SCORE_WEIGHTS[exercise].items() if k in acc}
+    total_w = sum(weights.values())
+    if not total_w:
+        return None
 
-# ── 운동별 점수 ────────────────────────────────────────────────────────────────
-def score_squat(aligned):
-    """E = 0.40 e_knee + 0.35 e_pelvis + 0.25 e_torso"""
-    return weighted_score(aligned, SCORE_ITEM_FEATURES['squat'],
-                          SCORE_WEIGHTS['squat'], SCORE_TOLERANCES['squat'])
-
-
-def score_lunge(aligned):
-    """E = 0.35 e_frontKnee + 0.20 e_rearKnee + 0.25 e_pelvis + 0.20 e_torso"""
-    return weighted_score(aligned, SCORE_ITEM_FEATURES['lunge'],
-                          SCORE_WEIGHTS['lunge'], SCORE_TOLERANCES['lunge'])
-
-
-def score_lateral_raise(aligned):
-    """E = 0.35 e_shoulder + 0.20 e_elbow + 0.30 e_wrist + 0.15 e_torso (좌우는 평균 오차 후 정규화)"""
-    return weighted_score(aligned, SCORE_ITEM_FEATURES['lateral_raise'],
-                          SCORE_WEIGHTS['lateral_raise'], SCORE_TOLERANCES['lateral_raise'])
-
-
-SCORE_FUNCTIONS = {'squat': score_squat, 'lunge': score_lunge, 'lateral_raise': score_lateral_raise}
+    items, score, any_fault = [], 0.0, False
+    for key, w in weights.items():
+        a = acc[key]
+        view, feat = key.split('.', 1)
+        closeness = a['close_sum'] / a['n']
+        s = item_score(closeness, a['fault_reps'], a['reps'], a['severity'])
+        score += (w / total_w) * s
+        any_fault |= a['fault_reps'] > 0
+        items.append({'item': key, 'view': view, 'view_kr': VIEW_KR[view], 'feature': feat,
+                      'name': names.get(feat, feat), 'weight': round(w / total_w, 4),
+                      'score': round(s, 1), 'fault_reps': a['fault_reps'],
+                      'total_reps': a['reps'],
+                      'severity': round(a['severity'], 2) if a['severity'] is not None else None,
+                      'closeness': round(closeness, 4)})
+    if any_fault:
+        score = min(score, FAULT_CEIL)
+    return {'score': min(max(score, 0.0), 100.0), 'items': items}
