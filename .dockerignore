@@ -14,6 +14,7 @@ clone-temp/
 
 # 파이프라인 생성물 (이미지 빌드 시 build_references.py 로 재생성)
 data/processed/
+data/guides/
 data/app.db
 data/media/
 .env

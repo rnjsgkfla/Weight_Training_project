@@ -1,0 +1,26 @@
+# Run with: docker compose -f docker-compose.yml -f docker-compose.https.yml up -d
+# Set PUBLIC_DOMAIN in .env first (hostname only, without https://).
+services:
+  api:
+    ports: !override
+      - "127.0.0.1:8000:8080"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Set PUBLIC_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/guides:/srv/guides:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy_data:
+  caddy_config:

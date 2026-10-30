@@ -18,36 +18,54 @@ struct ResultsView: View {
                 }
             } else if let issues = response.issues {
                 List {
-                    ScoreSections(response: response)
+                    ResultOverview(response: response)
                     if issues.isEmpty {
                         Section {
                             Label("모든 회차에서 큰 문제가 없어요", systemImage: "checkmark.seal.fill")
                                 .foregroundStyle(.green)
                         }
                     } else {
-                        Section("이것부터 고쳐보세요") {
+                        Section("다음 세트에서는 이것부터") {
                             NavigationLink { IssueDetailView(issue: issues[0]) } label: {
-                                IssueCard(issue: issues[0], isTop: true)
+                                VStack(alignment: .leading, spacing: 12) {
+                                    IssueCard(issue: issues[0], isTop: true)
+                                    if let advice = issues[0].advice, !advice.isEmpty {
+                                        Text(advice).font(.subheadline).foregroundStyle(.primary)
+                                    }
+                                    Label("모범 자세와 비교하기", systemImage: "play.rectangle")
+                                        .font(.subheadline.bold()).foregroundStyle(Color.brand)
+                                }
                             }
                         }
                         if issues.count > 1 {
-                            Section("다른 고칠 점") {
+                            Section {
+                              DisclosureGroup("다른 고칠 점 \(issues.count - 1)개") {
                                 ForEach(issues.dropFirst()) { issue in
                                     NavigationLink { IssueDetailView(issue: issue) } label: {
                                         IssueCard(issue: issue, isTop: false)
                                     }
                                 }
+                              }
                             }
                         }
                     }
                     if let good = response.goodPoints, !good.isEmpty {
                         Section("잘한 점") {
-                            Label(good.joined(separator: ", "), systemImage: "hand.thumbsup.fill")
+                            ForEach(good, id: \.self) { point in
+                              Label(point, systemImage: "checkmark.circle.fill")
                                 .font(.subheadline)
                                 .foregroundStyle(.green)
+                            }
                         }
                     }
                     Section {
+                        NavigationLink {
+                            List { ScoreSections(response: response) }
+                                .navigationTitle("점수 계산 내역")
+                                .navigationBarTitleDisplayMode(.inline)
+                        } label: {
+                            Label("점수 계산 내역", systemImage: "chart.bar.xaxis")
+                        }
                         NavigationLink {
                             List { RepGroupSections(items: response.items) }
                                 .navigationTitle("회차별 결과")
@@ -66,6 +84,47 @@ struct ResultsView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// 정면·측면은 별도 촬영이므로 반복 수를 합쳐 하나의 세트처럼 표시하지 않는다.
+struct ResultOverview: View {
+    let response: AnalyzeResponse
+
+    var body: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(Exercises.name(response.exercise)).font(.subheadline).foregroundStyle(.secondary)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let score = response.stats?.score {
+                        Text("\(score)").font(.system(size: 44, weight: .bold, design: .rounded))
+                            .foregroundStyle(ScoreBadge.color(score))
+                        Text("점").foregroundStyle(.secondary)
+                    } else {
+                        Text("점수 없음").font(.title2.bold())
+                    }
+                    Spacer()
+                    Text("자세 분석 결과").font(.subheadline)
+                }
+                if let counts = response.stats?.repCount {
+                    ForEach(["side", "front"].filter { counts[$0] != nil }, id: \.self) { view in
+                        Label("\(view == "side" ? "측면" : "정면") · \(counts[view] ?? 0)회 분석", systemImage: "video")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                Text("같은 운동과 촬영 방향의 기록끼리 점수를 비교해 주세요.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 6)
+        }
+        if let warnings = response.stats?.warnings, !warnings.isEmpty {
+            Section("분석 범위 안내") {
+                ForEach(warnings, id: \.self) { warning in
+                    Label(warning, systemImage: "info.circle")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }
 

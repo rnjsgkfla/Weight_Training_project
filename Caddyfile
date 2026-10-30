@@ -1,0 +1,10 @@
+{$PUBLIC_DOMAIN} {
+    handle_path /guides/* {
+        root * /srv/guides
+        header Cache-Control "public, max-age=3600"
+        file_server
+    }
+    handle {
+        reverse_proxy api:8080
+    }
+}

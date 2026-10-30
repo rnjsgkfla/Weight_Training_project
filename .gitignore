@@ -12,6 +12,7 @@ __pycache__/
 
 # 파이프라인 생성물 (스크립트로 재생성 가능)
 data/processed/
+data/guides/
 
 # 로컬 DB·기록 이미지 (uvicorn 직접 실행 시), 비밀값
 data/app.db

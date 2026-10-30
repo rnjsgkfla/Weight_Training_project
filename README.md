@@ -120,7 +120,38 @@ python build_references.py            # 기준 데이터가 없으면 먼저 생
 `test_analyze_regression.py` 는 샘플 영상(`data/raw/user_squat_*`)의 반복 수·점수·지적 항목을
 고정해 둔 회귀 테스트다. 판정 규칙을 의도적으로 바꿨다면 기대값을 함께 갱신한다.
 
-## 웹 데모 (Gradio)
+## Lightsail HTTPS 배포
+
+현재 공개 API 주소는 `https://posefeedback.duckdns.org`입니다.
+DuckDNS의 A 레코드는 Lightsail 고정 IP를 가리켜야 하며, Lightsail 방화벽에서
+TCP 80·443을 허용해야 합니다. `.env`에 `PUBLIC_DOMAIN=posefeedback.duckdns.org`를 설정합니다.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+curl --fail https://posefeedback.duckdns.org/health
+```
+
+HTTPS 배포 후 업데이트에도 위 두 Compose 파일을 함께 지정합니다.
+Caddy가 인증서를 자동 발급·갱신하고 인증서는 `caddy_data` 볼륨에 보관합니다.
+API의 8000 포트는 서버 내부에만 바인딩되며 DB와 기존 기록 볼륨은 유지됩니다.
+iOS 앱의 로그인 화면 또는 설정에서 서버 주소를 위 HTTPS 주소로 변경하면
+맥의 SSH 터널 없이 AWS에 직접 접속합니다.
+
+## 촬영 가이드 영상 배포
+촬영 가이드 영상은 분석용 원본과 별도로 생성합니다. Ubuntu 서버에 `ffmpeg`를 설치한 뒤:
+
+```bash
+sudo apt-get install -y ffmpeg
+python3 build_guides.py
+docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --no-deps caddy
+```
+
+`data/guides/`의 다섯 기준 영상만 Caddy의 `/guides/` 경로로 제공합니다.
+예: `https://posefeedback.duckdns.org/guides/squat-side.mp4`.
+원본을 교체하면 생성 스크립트를 다시 실행합니다. 기존 원본과 분석 기준 데이터는 변경하지 않습니다.
+영상은 H.264 MP4(최대 720px, 무음)이며 구간 다운로드를 지원합니다. 로컬 API만 실행하는 환경에서는 이 정적 경로도 별도로 제공해야 합니다.
+
+## 웹 데모 실행 (Gradio)
 ```bash
 ./venv/bin/pip install -r requirements.txt   # gradio 포함
 ./venv/bin/python app.py                      # http://127.0.0.1:7860

@@ -1,4 +1,13 @@
 name: PoseFeedback
+schemes:
+  PoseFeedback:
+    build:
+      targets:
+        PoseFeedback: all
+    test:
+      targets:
+        - PoseFeedbackTests
+        - PoseFeedbackUITests
 options:
   bundleIdPrefix: com.posefeedback
   deploymentTarget:
@@ -37,3 +46,21 @@ targets:
         NSMicrophoneUsageDescription: 운동 영상 촬영 시 소리를 함께 녹화합니다.
         # 같은 Wi-Fi 의 맥(개발 서버)에 접속할 때 뜨는 '로컬 네트워크' 권한 설명
         NSLocalNetworkUsageDescription: 같은 Wi-Fi 에 있는 분석 서버에 접속하기 위해 로컬 네트워크를 사용합니다.
+  PoseFeedbackTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [PoseFeedbackTests]
+    dependencies:
+      - target: PoseFeedback
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+  PoseFeedbackUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [PoseFeedbackUITests]
+    dependencies:
+      - target: PoseFeedback
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES

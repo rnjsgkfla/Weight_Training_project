@@ -23,7 +23,15 @@ struct ContentView: View {
     @State private var isLoading = false
     @State private var result: AnalyzeResponse?
     @State private var showResults = false
-    @State private var errorMessage: String?
+    @State private var failure: AnalysisFailure?
+    @State private var showGuide = false
+    @State private var startedAt = Date()
+    @State private var uploadProgress: Double?
+    @State private var requestID = UUID()
+
+    init(initialSide: VideoSlot = VideoSlot()) {
+        _side = State(initialValue: initialSide)
+    }
 
     private let exercises = Exercises.all
 
@@ -43,13 +51,25 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { scroll in
             ScrollView {
                 VStack(spacing: 26) {
                     hero
-                    exerciseSection
-                    videoSection
+                        .id("analysis.top")
+                    if isLoading {
+                        AnalysisWaitingCard(startedAt: startedAt, uploadProgress: uploadProgress)
+                    }
+                    if let failure { failureCard(failure) }
+                    Group {
+                        exerciseSection
+                        videoSection
+                    }
+                    .disabled(isLoading)
                 }
                 .padding(20)
+            }
+            .onChange(of: isLoading) { _, _ in
+                withAnimation { scroll.scrollTo("analysis.top", anchor: .top) }
             }
             .background(Color(.systemGroupedBackground))
             .toolbar(.hidden, for: .navigationBar)
@@ -57,12 +77,9 @@ struct ContentView: View {
             .navigationDestination(isPresented: $showResults) {
                 if let result { ResultsView(response: result) }
             }
-            // 분석 오류는 화면 아래에 가려지지 않게 알림창으로 띄운다
-            .alert("분석하지 못했어요", isPresented: Binding(get: { errorMessage != nil },
-                                                        set: { if !$0 { errorMessage = nil } })) {
-                Button("확인", role: .cancel) {}
-            } message: {
-                Text(errorMessage ?? "")
+            .sheet(isPresented: $showGuide) {
+                CaptureGuide(exercise: exercise, view: exercise == "lateral_raise" ? "front" : "side")
+            }
             }
         }
         .tint(.brand)
@@ -101,13 +118,16 @@ struct ContentView: View {
     private func exerciseCard(key: String, title: String, icon: String) -> some View {
         let selected = exercise == key
         return Button {
+            guard exercise != key else { return }
             withAnimation(.easeInOut(duration: 0.15)) {
                 exercise = key
-                // 측면 뷰를 쓰지 않는 운동으로 바꾸면 이전에 골라둔 측면 영상은 비운다
-                if !(exerciseViews[key] ?? []).contains("side") {
-                    side = VideoSlot()
-                    sideItem = nil
-                }
+                // 다른 운동의 영상을 잘못 전송하지 않도록 양쪽을 초기화한다.
+                // loadID도 교체되어 이전 비동기 영상 준비 결과는 적용되지 않는다.
+                side = VideoSlot()
+                front = VideoSlot()
+                sideItem = nil
+                frontItem = nil
+                failure = nil
             }
         } label: {
             VStack(spacing: 8) {
@@ -129,6 +149,7 @@ struct ContentView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("exercise.\(key)")
     }
 
     // MARK: - 영상 선택
@@ -136,6 +157,23 @@ struct ContentView: View {
     private var videoSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(currentViews.count > 1 ? "영상 (하나 이상)" : "영상").font(.headline)
+            Button { showGuide = true } label: {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "camera.viewfinder").font(.title2)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("촬영 전에 확인해 주세요").font(.subheadline.bold())
+                        Text(exercise == "lateral_raise" ? "정면에서 양팔과 골반까지 · 60초 이내" : "정면 또는 측면 · 전신이 보이게 · 60초 이내")
+                            .font(.caption)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.caption)
+                }
+                .padding(14)
+                .background(Color.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.brand)
+            .accessibilityIdentifier("capture.guide")
             if currentViews.contains("side") {
                 videoCard("측면 영상", slot: $side, item: $sideItem,
                           showOptions: $showSideOptions, showPicker: $showSidePicker, showCamera: $showSideCamera)
@@ -144,7 +182,7 @@ struct ContentView: View {
                 videoCard("정면 영상", slot: $front, item: $frontItem,
                           showOptions: $showFrontOptions, showPicker: $showFrontPicker, showCamera: $showFrontCamera)
             }
-            Text("촬영하거나 앨범에서 선택하세요. 전신이 화면에 다 나오게, 5~10회 반복한 60초 이하 영상이 좋아요.")
+            Text("5~10회 반복한 영상을 선택하세요. 운동 종류를 바꾸면 선택한 영상은 초기화돼요.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -240,7 +278,7 @@ struct ContentView: View {
                 if isLoading || isPreparing {
                     HStack(spacing: 8) {
                         ProgressView().tint(.white)
-                        Text(isLoading ? "영상 분석 중… (약 15~30초)" : "영상 준비 중…")
+                        Text(isLoading ? "분석 요청 진행 중…" : "영상 준비 중…")
                     }
                 } else {
                     Text("분석하기")
@@ -254,6 +292,7 @@ struct ContentView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .disabled(!canAnalyze || isLoading || isPreparing)
+        .accessibilityIdentifier("analysis.submit")
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background(.bar)
@@ -262,24 +301,57 @@ struct ContentView: View {
     // MARK: - 분석 실행
 
     private func analyze() async {
+        guard canAnalyze, !isLoading, !isPreparing else { return }
+        let id = UUID()
+        requestID = id
+        let selectedExercise = exercise
+        let sideData = currentViews.contains("side") ? side.data : nil
+        let frontData = front.data
         isLoading = true
-        errorMessage = nil
+        startedAt = Date()
+        uploadProgress = nil
+        failure = nil
+        defer { isLoading = false }
         do {
             let response = try await appState.run {
-                try await $0.analyze(exercise: exercise, sideVideo: side.data, frontVideo: front.data)
+                try await $0.analyze(exercise: selectedExercise, sideVideo: sideData, frontVideo: frontData) { progress in
+                    Task { @MainActor in
+                        guard requestID == id, isLoading else { return }
+                        uploadProgress = progress
+                    }
+                }
             }
             result = response
             showResults = true
             if response.sessionId != nil { appState.historyVersion += 1 }  // 기록 탭 새로고침
         } catch {
-            errorMessage = error.localizedDescription
+            failure = AnalysisFailure.describe(error)
         }
-        isLoading = false
+    }
+
+    private func failureCard(_ failure: AnalysisFailure) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(failure.title, systemImage: "exclamationmark.triangle.fill")
+                .font(.headline).foregroundStyle(.orange)
+            Text(failure.message).font(.subheadline)
+            Text("선택한 영상은 그대로 남아 있어요.")
+                .font(.caption).foregroundStyle(.secondary)
+            if failure.canRetry {
+                Button("같은 영상으로 다시 시도") { Task { await analyze() } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canAnalyze || isPreparing || isLoading)
+                    .accessibilityIdentifier("analysis.retry")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
     }
 
     /// 고른/촬영한 영상 파일을 540p 로 압축해 카드에 담는다 (60초 초과면 카드에 오류 표시).
     /// 영상을 메모리에 통째로 올리지 않고 파일로 받아 길이부터 확인한다.
     private func loadVideo(slot: Binding<VideoSlot>, source: () async throws -> URL) async {
+        failure = nil
         let loadID = UUID()
         slot.wrappedValue = VideoSlot(isPreparing: true, loadID: loadID)
         var result = VideoSlot(loadID: loadID)

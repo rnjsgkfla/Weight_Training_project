@@ -6,9 +6,28 @@ struct PoseFeedbackApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            entryView
                 .environment(appState)
         }
+    }
+
+    @ViewBuilder private var entryView: some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--preview-retry") {
+            ContentView(initialSide: VideoSlot(data: Data([0])))
+        } else if ProcessInfo.processInfo.arguments.contains("--preview-analysis") {
+            ContentView()
+        } else if ProcessInfo.processInfo.arguments.contains("--preview-results") {
+            NavigationStack { ResultsView(response: ExperienceFixtures.result) }
+        } else if ProcessInfo.processInfo.arguments.contains("--preview-waiting") {
+            AnalysisWaitingCard(startedAt: .now.addingTimeInterval(-65), uploadProgress: 1)
+                .padding()
+        } else {
+            RootView()
+        }
+        #else
+        RootView()
+        #endif
     }
 }
 

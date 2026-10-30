@@ -9,12 +9,12 @@ final class AppState {
     private static let tokenKey = "accessToken"
     private static let emailKey = "email"
     private static let serverKey = "serverURL"
-    static let defaultServerURL = "http://localhost:8000"
+    static let defaultServerURL = "https://posefeedback.duckdns.org"
 
     private(set) var token: String? = Keychain.load(AppState.tokenKey)
     private(set) var email: String? = UserDefaults.standard.string(forKey: AppState.emailKey)
 
-    /// 백엔드 주소 (시뮬레이터 기본값 localhost, 배포 후엔 https://도메인)
+    /// 기본값은 AWS HTTPS API. 로컬 개발 시 설정에서 http://localhost:8000 으로 변경.
     var serverURL: String = UserDefaults.standard.string(forKey: AppState.serverKey) ?? AppState.defaultServerURL {
         didSet { UserDefaults.standard.set(serverURL, forKey: AppState.serverKey) }
     }
@@ -23,7 +23,14 @@ final class AppState {
     var historyVersion = 0
 
     var isLoggedIn: Bool { token != nil }
-    var api: APIClient { APIClient(baseURL: serverURL, token: token) }
+    var api: APIClient {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--preview-retry") {
+            return APIClient(baseURL: "https://preview.invalid", token: nil, session: ExperienceFixtures.session)
+        }
+        #endif
+        return APIClient(baseURL: serverURL, token: token)
+    }
 
     func setServerURL(_ raw: String) {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)

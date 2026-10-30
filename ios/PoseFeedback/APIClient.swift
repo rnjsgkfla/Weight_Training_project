@@ -23,6 +23,7 @@ struct APIClient {
     var baseURL: String
     /// 로그인 토큰. 있으면 Authorization: Bearer 헤더로 보낸다.
     var token: String?
+    var session: URLSession = .shared
 
     // MARK: - 계정
 
@@ -44,7 +45,8 @@ struct APIClient {
 
     // MARK: - 분석
 
-    func analyze(exercise: String, sideVideo: Data?, frontVideo: Data?) async throws -> AnalyzeResponse {
+    func analyze(exercise: String, sideVideo: Data?, frontVideo: Data?,
+                 onUploadProgress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> AnalyzeResponse {
         let boundary = "Boundary-\(UUID().uuidString)"
         var request = try request("POST", "/analyze")
         request.timeoutInterval = 180
@@ -72,7 +74,7 @@ struct APIClient {
         appendString("--\(boundary)--\r\n")
 
         request.httpBody = body
-        return try await send(request)
+        return try await send(request, delegate: AnalysisUploadDelegate(progress: onUploadProgress))
     }
 
     // MARK: - 히스토리
@@ -115,8 +117,8 @@ struct APIClient {
         return req
     }
 
-    private func send<T: Decodable>(_ request: URLRequest) async throws -> T {
-        let data = try await perform(request)
+    private func send<T: Decodable>(_ request: URLRequest, delegate: (any URLSessionTaskDelegate)? = nil) async throws -> T {
+        let data = try await perform(request, delegate: delegate)
         do {
             return try Self.decoder.decode(T.self, from: data)
         } catch {
@@ -128,8 +130,8 @@ struct APIClient {
         _ = try await perform(request)
     }
 
-    private func perform(_ request: URLRequest) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(for: request)
+    private func perform(_ request: URLRequest, delegate: (any URLSessionTaskDelegate)? = nil) async throws -> Data {
+        let (data, response) = try await session.data(for: request, delegate: delegate)
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             // 토큰을 보냈는데 401 = 만료·무효 토큰 (로그인 실패의 401 은 서버 문구를 그대로 보여준다)
@@ -154,4 +156,17 @@ struct APIClient {
         }
         return d
     }()
+}
+
+/// URLSession이 실제 전송한 바이트만 보고한다. 분석 진행률과는 별개다.
+private final class AnalysisUploadDelegate: NSObject, URLSessionTaskDelegate {
+    let progress: @Sendable (Double) -> Void
+
+    init(progress: @escaping @Sendable (Double) -> Void) { self.progress = progress }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
+                    totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        progress(min(1, max(0, Double(totalBytesSent) / Double(totalBytesExpectedToSend))))
+    }
 }
